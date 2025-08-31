@@ -69,6 +69,7 @@ extension_LTLIBRARIES =		\
   sno_globalnickchange.la	\
   sno_globaloper.la		\
   tag_message_id.la		\
+  tag_reply.la      \
   tag_typing.la		\
   umode_hide_idle_time.la	\
   umode_noctcp.la		\
@@ -76,4 +77,8 @@ extension_LTLIBRARIES =		\
 
 if HAVE_HYPERSCAN
     extension_LTLIBRARIES += filter.la
+endif
+
+if HAVE_ICU
+    extension_LTLIBRARIES += tag_react.la
 endif
