@@ -57,6 +57,7 @@ extension_LTLIBRARIES =		\
   m_sendbans.la			\
   m_shedding.la			\
   m_webirc.la			\
+  multiline.la          \
   no_kill_services.la		\
   no_locops.la			\
   no_oper_invis.la		\
