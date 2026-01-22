@@ -91,10 +91,10 @@ static bool check_channel_name_loc(struct Client *source_p, const char *name);
 static void send_join_error(struct Client *source_p, int numeric, const char *name);
 
 static char *set_final_mode(char *mbuf, char *parabuf, struct Mode *mode, struct Mode *oldmode);
-static void remove_our_modes(struct Channel *chptr, struct Client *source_p);
+static void remove_our_modes(struct Channel *chptr, struct Client *source_p, struct MsgTag *batch);
 
 static void remove_ban_list(struct Channel *chptr, struct Client *source_p,
-			    rb_dlink_list * list, char c, int mems);
+			    rb_dlink_list * list, char c, int mems, struct MsgTag *batch);
 
 static rb_dlink_list netjoin_batches = {0};
 
@@ -484,7 +484,7 @@ ms_join(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source_
 	{
 		mbuf = set_final_mode(mbuf, parabuf, &mode, &chptr->mode);
 		chptr->mode = mode;
-		remove_our_modes(chptr, source_p);
+		remove_our_modes(chptr, source_p, NULL);
 		RB_DLINK_FOREACH_SAFE(ptr, next_ptr, chptr->invites.head)
 		{
 			del_invite(chptr, ptr->data);
@@ -658,13 +658,13 @@ ms_sjoin(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source
 
 	if(!isnew && !newts && oldts)
 	{
-		sendto_channel_local(&me, ALL_MEMBERS, chptr,
-				     ":%s NOTICE %s :*** Notice -- TS for %s "
-				     "changed from %ld to 0",
-				     me.name, chptr->chname, chptr->chname, (long) oldts);
+		sendto_channel_local_tags(&me, ALL_MEMBERS, NULL, chptr,
+			batch_tag.value == NULL ? 0 : 1, &batch_tag,
+			":%s NOTICE %s :*** Notice -- TS for %s changed from %ld to 0",
+			me.name, chptr->chname, chptr->chname, (long) oldts);
 		sendto_realops_snomask(SNO_GENERAL, L_ALL,
-				     "Server %s changing TS on %s from %ld to 0",
-				     source_p->name, chptr->chname, (long) oldts);
+			"Server %s changing TS on %s from %ld to 0",
+			source_p->name, chptr->chname, (long) oldts);
 	}
 
 	if(isnew)
@@ -697,13 +697,15 @@ ms_sjoin(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source
 			{
 				msptr = ptr->data;
 				who = msptr->client_p;
-				sendto_one(who, ":%s KICK %s %s :Net Rider",
-						     me.name, chptr->chname, who->name);
+				sendto_one_tags(who, NOCAPS, NOCAPS,
+					batch_tag.value == NULL ? 0 : 1, &batch_tag,
+					":%s KICK %s %s :Net Rider", me.name, chptr->chname, who->name);
 
-				sendto_server(NULL, chptr, CAP_TS6, NOCAPS,
-					      ":%s KICK %s %s :Net Rider",
-					      me.id, chptr->chname,
-					      who->id);
+				sendto_server_tags(NULL, chptr, CAP_TS6, NOCAPS,
+					batch_tag.value == NULL ? 0 : 1, &burst_tag,
+					":%s KICK %s %s :Net Rider",
+					me.id, chptr->chname,
+					who->id);
 				remove_user_from_channel(msptr);
 				if (--l == 0)
 					break;
@@ -755,29 +757,27 @@ ms_sjoin(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source
 	/* Lost the TS, other side wins, so remove modes on this side */
 	if(!keep_our_modes)
 	{
-		remove_our_modes(chptr, fakesource_p);
+		remove_our_modes(chptr, fakesource_p, &batch_tag);
 		RB_DLINK_FOREACH_SAFE(ptr, next_ptr, chptr->invites.head)
 		{
 			del_invite(chptr, ptr->data);
 		}
 
-		if(rb_dlink_list_length(&chptr->banlist) > 0)
-			remove_ban_list(chptr, fakesource_p, &chptr->banlist, 'b', ALL_MEMBERS);
-		if(rb_dlink_list_length(&chptr->exceptlist) > 0)
-			remove_ban_list(chptr, fakesource_p, &chptr->exceptlist,
-					'e', ONLY_CHANOPS);
-		if(rb_dlink_list_length(&chptr->invexlist) > 0)
-			remove_ban_list(chptr, fakesource_p, &chptr->invexlist,
-					'I', ONLY_CHANOPS);
-		if(rb_dlink_list_length(&chptr->quietlist) > 0)
-			remove_ban_list(chptr, fakesource_p, &chptr->quietlist,
-					'q', ALL_MEMBERS);
+		if (rb_dlink_list_length(&chptr->banlist) > 0)
+			remove_ban_list(chptr, fakesource_p, &chptr->banlist, 'b', ALL_MEMBERS, &batch_tag);
+		if (rb_dlink_list_length(&chptr->exceptlist) > 0)
+			remove_ban_list(chptr, fakesource_p, &chptr->exceptlist, 'e', ONLY_CHANOPS, &batch_tag);
+		if (rb_dlink_list_length(&chptr->invexlist) > 0)
+			remove_ban_list(chptr, fakesource_p, &chptr->invexlist, 'I', ONLY_CHANOPS, &batch_tag);
+		if (rb_dlink_list_length(&chptr->quietlist) > 0)
+			remove_ban_list(chptr, fakesource_p, &chptr->quietlist, 'q', ALL_MEMBERS, &batch_tag);
 		chptr->bants++;
 
-		sendto_channel_local(&me, ALL_MEMBERS, chptr,
-				     ":%s NOTICE %s :*** Notice -- TS for %s changed from %ld to %ld",
-				     me.name, chptr->chname, chptr->chname,
-				     (long) oldts, (long) newts);
+		sendto_channel_local_tags(&me, ALL_MEMBERS, NULL, chptr,
+			batch_tag.value == NULL ? 0 : 1, &batch_tag,
+			":%s NOTICE %s :*** Notice -- TS for %s changed from %ld to %ld",
+			me.name, chptr->chname, chptr->chname,
+			(long) oldts, (long) newts);
 		/* Update capitalization in channel name, this makes the
 		 * capitalization timestamped like modes are -- jilles */
 		strcpy(chptr->chname, parv[2]);
@@ -787,8 +787,9 @@ ms_sjoin(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source
 	}
 
 	if(*modebuf != '\0')
-		sendto_channel_local(fakesource_p, ALL_MEMBERS, chptr, ":%s MODE %s %s %s",
-				     fakesource_p->name, chptr->chname, modebuf, parabuf);
+		sendto_channel_local_tags(fakesource_p, ALL_MEMBERS, NULL, chptr,
+			batch_tag.value == NULL ? 0 : 1, &batch_tag,
+			":%s MODE %s %s %s", fakesource_p->name, chptr->chname, modebuf, parabuf);
 
 	*modebuf = *parabuf = '\0';
 
@@ -1216,7 +1217,7 @@ set_final_mode(char *mbuf, char *parabuf, struct Mode *mode, struct Mode *oldmod
  * side effects	-
  */
 static void
-remove_our_modes(struct Channel *chptr, struct Client *source_p)
+remove_our_modes(struct Channel *chptr, struct Client *source_p, struct MsgTag *batch)
 {
 	struct membership *msptr;
 	rb_dlink_node *ptr;
@@ -1247,11 +1248,12 @@ remove_our_modes(struct Channel *chptr, struct Client *source_p)
 				if(count >= MAXMODEPARAMS)
 				{
 					*mbuf = '\0';
-					sendto_channel_local(source_p, ALL_MEMBERS, chptr,
-							     ":%s MODE %s %s %s %s %s %s",
-							     source_p->name, chptr->chname,
-							     lmodebuf, lpara[0], lpara[1],
-							     lpara[2], lpara[3]);
+					sendto_channel_local_tags(source_p, ALL_MEMBERS, NULL, chptr,
+						(batch != NULL && batch->value != NULL) ? 1 : 0, batch,
+						":%s MODE %s %s %s %s %s %s",
+						source_p->name, chptr->chname,
+						lmodebuf, lpara[0], lpara[1],
+						lpara[2], lpara[3]);
 
 					/* preserve the initial '-' */
 					mbuf = lmodebuf;
@@ -1279,10 +1281,11 @@ remove_our_modes(struct Channel *chptr, struct Client *source_p)
 		if(count >= MAXMODEPARAMS)
 		{
 			*mbuf = '\0';
-			sendto_channel_local(source_p, ALL_MEMBERS, chptr,
-					     ":%s MODE %s %s %s %s %s %s",
-					     source_p->name, chptr->chname, lmodebuf,
-					     lpara[0], lpara[1], lpara[2], lpara[3]);
+			sendto_channel_local_tags(source_p, ALL_MEMBERS, NULL, chptr,
+				(batch != NULL && batch->value != NULL) ? 1 : 0, batch,
+				":%s MODE %s %s %s %s %s %s",
+				source_p->name, chptr->chname, lmodebuf,
+				lpara[0], lpara[1], lpara[2], lpara[3]);
 			mbuf = lmodebuf;
 			*mbuf++ = '-';
 			count = 0;
@@ -1295,14 +1298,14 @@ remove_our_modes(struct Channel *chptr, struct Client *source_p)
 	if(count != 0)
 	{
 		*mbuf = '\0';
-		sendto_channel_local(source_p, ALL_MEMBERS, chptr,
-				     ":%s MODE %s %s %s %s %s %s",
-				     source_p->name, chptr->chname, lmodebuf,
-				     EmptyString(lpara[0]) ? "" : lpara[0],
-				     EmptyString(lpara[1]) ? "" : lpara[1],
-				     EmptyString(lpara[2]) ? "" : lpara[2],
-				     EmptyString(lpara[3]) ? "" : lpara[3]);
-
+		sendto_channel_local_tags(source_p, ALL_MEMBERS, NULL, chptr,
+			(batch != NULL && batch->value != NULL) ? 1 : 0, batch,
+			":%s MODE %s %s %s %s %s %s",
+			source_p->name, chptr->chname, lmodebuf,
+			EmptyString(lpara[0]) ? "" : lpara[0],
+			EmptyString(lpara[1]) ? "" : lpara[1],
+			EmptyString(lpara[2]) ? "" : lpara[2],
+			EmptyString(lpara[3]) ? "" : lpara[3]);
 	}
 }
 
@@ -1314,7 +1317,7 @@ remove_our_modes(struct Channel *chptr, struct Client *source_p)
  */
 static void
 remove_ban_list(struct Channel *chptr, struct Client *source_p,
-		rb_dlink_list * list, char c, int mems)
+		rb_dlink_list * list, char c, int mems, struct MsgTag *batch)
 {
 	static char lmodebuf[BUFSIZE];
 	static char lparabuf[BUFSIZE];
@@ -1345,7 +1348,9 @@ remove_ban_list(struct Channel *chptr, struct Client *source_p,
 			*mbuf = '\0';
 			*(pbuf - 1) = '\0';
 
-			sendto_channel_local(source_p, mems, chptr, "%s %s", lmodebuf, lparabuf);
+			sendto_channel_local_tags(source_p, mems, NULL, chptr,
+				(batch != NULL && batch->value != NULL) ? 1 : 0, batch,
+				"%s %s", lmodebuf, lparabuf);
 
 			cur_len = mlen;
 			mbuf = lmodebuf + mlen;
