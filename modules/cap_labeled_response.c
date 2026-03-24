@@ -160,7 +160,9 @@ cap_labeled_response_process(void *data_)
 			extra = data->chptr->chname;
 		else if (data->target != NULL)
 			extra = data->target->name;
-		struct membership *msptr = find_channel_membership(data->chptr, outgoing_response_info->source_p);
+		struct membership *msptr = NULL;
+		if (data->chptr != NULL)
+			msptr = find_channel_membership(data->chptr, outgoing_response_info->source_p);
 		idebug("OUT %s %s (sees=%d same=%d (chan=%d serv=%d memb=%x)) sent=%d skip=%d label=%s batch=%s",
 			msgbuf->cmd, extra, data->source_sees_message,
 			outgoing_response_info->source_p == data->target,
