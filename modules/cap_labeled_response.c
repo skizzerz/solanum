@@ -21,6 +21,7 @@
 
 #include "stdinc.h"
 #include "hash.h"
+#include "logger.h"
 #include "modules.h"
 #include "response.h"
 #include "send.h"
@@ -78,6 +79,12 @@ static void
 cap_labeled_response_incoming(void *data_)
 {
 	hook_data_message_tag *data = data_;
+	const char *extra = "-";
+	const struct MsgBuf *msgbuf = data->message;
+	if (!strcmp(msgbuf->cmd, "ENCAP"))
+		extra = msgbuf->para[2];
+	else if (msgbuf->n_para > 1)
+		extra = msgbuf->para[1];
 
 	if (MyConnect(data->source)
 		&& IsClientCapable(data->source, CLICAP_LABELED_RESPONSE | CLICAP_BATCH)
@@ -85,6 +92,7 @@ cap_labeled_response_incoming(void *data_)
 		&& !EmptyString(data->value)
 		&& strlen(data->value) <= 64)
 	{
+		idebug("IN %s %s %s=%s", msgbuf->cmd, extra, data->key, data->value);
 		label_eligible = data->source;
 		SetClientCap(data->source, CLICAP_RECEIVE_LABEL);
 		outgoing_response_info = rb_malloc(sizeof(struct ResponseInfo));
@@ -97,6 +105,7 @@ cap_labeled_response_incoming(void *data_)
 	}
 	else if (IsServer(data->client) && !strcmp(serv_response_tag, data->key) && !EmptyString(data->value))
 	{
+		idebug("IN %s %s %s=%s", msgbuf->cmd, extra, data->key, data->value);
 		/* tag value should be UID,batch_id */
 		char uid[IDLEN] = { 0 };
 		const char *batch_id = strchr(data->value, ',');
@@ -144,13 +153,31 @@ cap_labeled_response_process(void *data_)
 
 	if (outgoing_response_info != NULL && MyConnect(outgoing_response_info->source_p))
 	{
-		if (!outgoing_response_info->sent && (data->source_sees_message || outgoing_response_info->source_p == data->target))
+		const char *extra = "-";
+		if (!strcmp(msgbuf->cmd, "ENCAP"))
+			extra = msgbuf->para[2];
+		else if (data->chptr != NULL)
+			extra = data->chptr->chname;
+		else if (data->target != NULL)
+			extra = data->target->name;
+		idebug("OUT %s %s sees=%d same=%d chan=%d sent=%d skip=%d label=%s batch=%s",
+			msgbuf->cmd, extra, data->source_sees_message,
+			outgoing_response_info->source_p == data->target,
+			(data->chptr != NULL && IsServer(data->source) && find_channel_membership(data->chptr, outgoing_response_info->source_p) != NULL),
+			outgoing_response_info->sent, outgoing_response_info->skip_tags, outgoing_response_info->label, outgoing_response_info->batch);
+		/* this assumes messages with a server as a source sent to a channel go to all members */
+		bool attach_tags = data->source_sees_message
+			|| outgoing_response_info->source_p == data->target
+			|| (data->chptr != NULL && IsServer(data->source) && find_channel_membership(data->chptr, outgoing_response_info->source_p) != NULL);
+
+		if (!outgoing_response_info->sent && attach_tags && !outgoing_response_info->skip_tags)
 		{
 			outgoing_response_info->sent = true;
 			msgbuf_append_tag(msgbuf, "label", outgoing_response_info->label, CLICAP_RECEIVE_LABEL);
 		}
 
-		if ((data->source_sees_message || outgoing_response_info->source_p == data->target)
+		if (attach_tags
+			&& !outgoing_response_info->skip_tags
 			&& !EmptyString(outgoing_response_info->batch)
 			&& msgbuf_get_tag(msgbuf, "batch") == NULL
 			&& strcmp(msgbuf->cmd, "BATCH") != 0)
