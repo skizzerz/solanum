@@ -975,41 +975,40 @@ static void
 process_echo_batch(struct Client *client_p, struct Client *source_p, struct Batch *batch, void *unused)
 {
 	struct MsgBuf *msgbuf = &batch->start->msg;
-	char origin[USERHOST_REPLYLEN];
-	char para_buf[BUFSIZE];
-	const char *params;
-	uint64_t serv_cap;
+	char params[BUFSIZE];
+	char prefix[USERHOST_REPLYLEN];
 	rb_dlink_node *ptr;
 
 	if (msgbuf->n_para < 4)
 		return;
 
-	snprintf(origin, sizeof(origin), MyClient(source_p) ? "%s!%s@%s" : "%s",
-		get_id(source_p, source_p), source_p->username, source_p->host);
+	struct Client *target_p = find_person(msgbuf->para[3]);
+	if (target_p == NULL)
+		return;
 
-	msgbuf_unparse_para(para_buf, sizeof(para_buf), msgbuf);
-	if (MyClient(source_p))
+	if (!MyClient(target_p))
 	{
-		params = strchr(para_buf, ' ') + 1;
-		serv_cap = NOCAPS;
+		if (NotServerCapable(target_p->from, CAP_ECHOB))
+			return;
+
+		/* don't give a prefix in the batch contents to save a bit of bandwidth on s2s links */
+		*prefix = '\0';
+		msgbuf_unparse_para(params, sizeof(params), msgbuf);
+		sendto_one_tags(target_p, NOCAPS, NOCAPS,
+			msgbuf->n_tags, msgbuf->tags, ":%s BATCH %s",
+			use_id(source_p), params);
 	}
 	else
-	{
-		params = para_buf;
-		serv_cap = CAP_ECHOB;
-	}
-
-	sendto_one_tags(source_p, serv_cap, NOCAPS,
-		msgbuf->n_tags, msgbuf->tags, ":%s BATCH +%s %s",
-		origin, batch->tag, params);
+		snprintf(prefix, sizeof(prefix), ":%s!%s@%s ",
+			target_p->name, target_p->username, target_p->host);
 
 	RB_DLINK_FOREACH(ptr, batch->messages.head)
 	{
 		msgbuf = &((struct BatchMessage *)ptr->data)->msg;
-		msgbuf_unparse_para(para_buf, sizeof(para_buf), msgbuf);
-		sendto_one_tags(source_p, serv_cap, NOCAPS,
-			msgbuf->n_tags, msgbuf->tags, ":%s %s %s",
-			origin, msgbuf->cmd, params);
+		msgbuf_unparse_para(params, sizeof(params), msgbuf);
+		sendto_one_tags(target_p, NOCAPS, NOCAPS,
+			msgbuf->n_tags, msgbuf->tags, "%s%s %s",
+			prefix, msgbuf->cmd, params);
 	}
 
 	RB_DLINK_FOREACH(ptr, batch->children.head)
@@ -1017,9 +1016,10 @@ process_echo_batch(struct Client *client_p, struct Client *source_p, struct Batc
 		process_echo_batch(client_p, source_p, ptr->data, unused);
 	}
 
-	sendto_one_tags(source_p, serv_cap, NOCAPS,
-		msgbuf->n_tags, msgbuf->tags, ":%s BATCH -%s",
-		origin, batch->tag);
+	if (!MyClient(target_p))
+		sendto_one_tags(target_p, NOCAPS, NOCAPS,
+			msgbuf->n_tags, msgbuf->tags, ":%s BATCH -%s",
+			use_id(source_p), batch->tag);
 }
 
 /*

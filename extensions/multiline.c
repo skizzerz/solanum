@@ -174,19 +174,324 @@ multiline_conf_info(void *data_)
 }
 
 static void
+send_channel_batch(struct Client *client_p, struct Client *source_p,
+	struct Channel *chptr, int type, bool opmod,
+	struct Batch *batch, size_t n_tags, struct MsgTag tags[])
+{
+	rb_dlink_node *ptr;
+	char origin[USERHOST_REPLYLEN];
+	int msgid = -1;
+
+	/* figure out command and normalize to uppercase */
+	const char *command = ((struct BatchMessage *)batch->messages.head->data)->msg.cmd;
+	enum message_type msgtype = !rb_strcasecmp(command, "PRIVMSG") ? MESSAGE_TYPE_PRIVMSG : MESSAGE_TYPE_NOTICE;
+	command = (msgtype == MESSAGE_TYPE_PRIVMSG) ? "PRIVMSG" : "NOTICE";
+
+	for (size_t i = 0; i < n_tags; i++)
+	{
+		if (!strcmp(tags[i].key, "msgid"))
+		{
+			msgid = (int)i;
+			break;
+		}
+	}
+
+	snprintf(origin, sizeof(origin), IsPerson(source_p) ? "%s!%s@%s" : "%s",
+		source_p->name, source_p->username, source_p->host);
+
+	struct MsgTag inner_tags[] = {
+		{ "batch", batch->id, CLICAP_BATCH },
+		{ "draft/multiline-concat", NULL, CLICAP_MULTILINE }
+	};
+
+	int result = can_send(chptr, source_p, NULL);
+	if (result)
+	{
+		if (result != CAN_SEND_OPV && MyClient(source_p)
+			&& !IsOperGeneral(source_p) && !add_channel_target(source_p, chptr))
+		{
+			sendto_one(source_p, form_str(ERR_TARGCHANGE),
+				me.name, source_p->name, chptr->chname);
+			return;
+		}
+
+		if (result != CAN_SEND_OPV && flood_attack_channel(msgtype, source_p, chptr, chptr->chname))
+			return;
+	}
+	else if (chptr->mode.mode & MODE_OPMODERATE
+		&& (!(chptr->mode.mode & MODE_NOPRIVMSGS) || IsMember(source_p, chptr)))
+	{
+		if (MyClient(source_p) && !IsOperGeneral(source_p) && !add_channel_target(source_p, chptr))
+		{
+			sendto_one(source_p, form_str(ERR_TARGCHANGE),
+				me.name, source_p->name, chptr->chname);
+			return;
+		}
+
+		if (!flood_attack_channel(msgtype, source_p, chptr, chptr->chname))
+		{
+			opmod = true;
+			type = ONLY_CHANOPS;
+		}
+	}
+	else
+	{
+		if (msgtype != MESSAGE_TYPE_NOTICE)
+			sendto_one_numeric(source_p, ERR_CANNOTSENDTOCHAN,
+				form_str(ERR_CANNOTSENDTOCHAN), chptr->chname);
+	}
+
+	unsigned int servcaps = NOCAPS;
+	if (type != ALL_MEMBERS)
+		servcaps |= CAP_CHW;
+
+	const char *status = "";
+	if (type & CHFL_VOICE)
+		status = "+";
+	else if (type & CHFL_CHANOP)
+		status = "@";
+
+	sendto_channel_local_with_capability_butone_tags(source_p, type, CLICAP_BATCH, NOCAPS,
+		chptr, n_tags, tags, ":%s BATCH +%s draft/multiline %s%s",
+		origin, batch->id, status, chptr->chname);
+
+	if (opmod)
+	{
+		sendto_match_servs_tags(source_p, "*", CAP_MULTILINE | CAP_STAG | CAP_EOPMOD | servcaps, NOCAPS,
+			n_tags, tags, "BATCH +%s draft/multiline =%s",
+			batch->id, chptr->chname);
+
+		sendto_match_servs_tags(source_p->servptr, "*", CAP_MULTILINE | CAP_STAG | servcaps, CAP_EOPMOD,
+			n_tags, tags, "BATCH +%s draft/multiline @%s",
+			batch->id, chptr->chname);
+	}
+	else
+		sendto_match_servs_tags(source_p, "*", CAP_MULTILINE | CAP_STAG | servcaps, NOCAPS,
+			n_tags, tags, "BATCH +%s draft/multiline %s%s",
+			batch->id, status, chptr->chname);
+
+	RB_DLINK_FOREACH(ptr, batch->messages.head)
+	{
+		struct BatchMessage *data = ptr->data;
+		bool concat = msgbuf_get_tag(&data->msg, "draft/multiline-concat") != NULL;
+
+		sendto_channel_local_with_capability_butone_tags(source_p, type, CLICAP_BATCH | CLICAP_MULTILINE, NOCAPS,
+			chptr, concat ? 2 : 1, inner_tags, ":%s %s %s%s :%s",
+			origin, command, status, chptr->chname, data->msg.para[2]);
+
+		if (opmod)
+		{
+			sendto_match_servs_tags(source_p, "*", CAP_MULTILINE | CAP_STAG | CAP_EOPMOD | servcaps, NOCAPS,
+				concat ? 2 : 1, inner_tags, "%s =%s :%s",
+				command, chptr->chname, data->msg.para[2]);
+
+			sendto_match_servs_tags(source_p->servptr, "*", CAP_MULTILINE | CAP_STAG | servcaps, CAP_EOPMOD,
+				concat ? 2 : 1, inner_tags, "NOTICE @%s :<%s:%s> %s",
+				chptr->chname, source_p->name, chptr->chname, data->msg.para[2]);
+		}
+		else
+			sendto_match_servs_tags(source_p, "*", CAP_MULTILINE | CAP_STAG | servcaps, NOCAPS,
+				concat ? 2 : 1, inner_tags, "%s %s%s :%s",
+				command, status, chptr->chname, data->msg.para[2]);
+
+		/* lot of different fallback scenarios for clients who don't support both batch and multiline */
+		if (EmptyString(data->msg.para[2]))
+			continue;
+
+		sendto_channel_local_with_capability_butone_tags(source_p, type, CLICAP_BATCH, CLICAP_MULTILINE,
+			chptr, 1, inner_tags, ":%s %s %s%s :%s",
+			origin, command, status, chptr->chname, data->msg.para[2]);
+
+		sendto_channel_local_with_capability_butone_tags(source_p, type, NOCAPS, CLICAP_BATCH,
+			chptr, n_tags, tags, ":%s %s %s%s :%s",
+			origin, command, status, chptr->chname, data->msg.para[2]);
+
+		if (opmod)
+		{
+			sendto_match_servs_tags(source_p, "*", CAP_EOPMOD | servcaps, CAP_MULTILINE,
+				n_tags, tags, "%s =%s :%s",
+				command, chptr->chname, data->msg.para[2]);
+
+			sendto_match_servs_tags(source_p->servptr, "*", servcaps, CAP_MULTILINE | CAP_EOPMOD,
+				n_tags, tags, "NOTICE @%s :<%s:%s> %s",
+				chptr->chname, source_p->name, chptr->chname, data->msg.para[2]);
+		}
+		else
+			sendto_match_servs_tags(source_p, "*", servcaps, CAP_MULTILINE,
+				n_tags, tags, "%s %s%s :%s",
+				command, status, chptr->chname, data->msg.para[2]);
+
+		/* msgid should only be attached to the first message of the fallback */
+		if (msgid > -1)
+			tags[msgid].capmask = NOCAPS;
+	}
+
+	sendto_channel_local_with_capability_butone(source_p, type, CLICAP_BATCH, NOCAPS,
+		chptr, ":%s BATCH -%s", origin, batch->id);
+
+	sendto_match_servs(source_p, "*", CAP_MULTILINE | CAP_STAG | servcaps, NOCAPS,
+		"BATCH -%s", batch->id);
+
+	/* send an echo-message */
+	if (MyClient(source_p) && IsClientCapable(source_p, CLICAP_ECHO_MESSAGE))
+	{
+		if (msgid > -1)
+			tags[msgid].capmask = CLICAP_MESSAGE_TAGS;
+
+		/* echo the incoming batch tag rather than our synthesized one */
+		inner_tags[0].value = batch->tag;
+
+		sendto_one_tags(source_p, NOCAPS, NOCAPS, n_tags, tags,
+			":%s BATCH +%s draft/multiline %s%s",
+			origin, batch->tag, status, chptr->chname);
+
+		RB_DLINK_FOREACH(ptr, batch->messages.head)
+		{
+			struct BatchMessage *data = ptr->data;
+			bool concat = msgbuf_get_tag(&data->msg, "draft/multiline-concat") != NULL;
+
+			sendto_one_tags(source_p, NOCAPS, NOCAPS, concat ? 2 : 1, inner_tags,
+				":%s %s %s%s :%s",
+				origin, command, status, chptr->chname, data->msg.para[2]);
+		}
+
+		sendto_one(source_p, ":%s BATCH -%s", origin, batch->tag);
+	}
+}
+
+static void
+send_private_batch(struct Client *client_p, struct Client *source_p,
+	struct Client *target_p,
+	struct Batch *batch, size_t n_tags, struct MsgTag tags[])
+{
+	rb_dlink_node *ptr;
+	char origin[USERHOST_REPLYLEN];
+	int msgid = -1;
+
+	/* figure out command and normalize to uppercase */
+	const char *command = ((struct BatchMessage *)batch->messages.head->data)->msg.cmd;
+	enum message_type msgtype = !rb_strcasecmp(command, "PRIVMSG") ? MESSAGE_TYPE_PRIVMSG : MESSAGE_TYPE_NOTICE;
+	command = (msgtype == MESSAGE_TYPE_PRIVMSG) ? "PRIVMSG" : "NOTICE";
+
+	for (size_t i = 0; i < n_tags; i++)
+	{
+		if (!strcmp(tags[i].key, "msgid"))
+		{
+			msgid = (int)i;
+			break;
+		}
+	}
+
+	snprintf(origin, sizeof(origin), IsPerson(source_p) ? "%s!%s@%s" : "%s",
+		get_id(source_p, target_p), source_p->username, source_p->host);
+
+	struct MsgTag inner_tags[] = {
+		{ "batch", batch->id, CLICAP_BATCH },
+		{ "draft/multiline-concat", NULL, CLICAP_MULTILINE },
+	};
+
+	if ((MyClient(target_p) && IsClientCapable(target_p, CLICAP_MULTILINE | CLICAP_BATCH))
+		|| (!MyClient(target_p) && IsServerCapable(target_p->from, CAP_MULTILINE)))
+	{
+		sendto_one_tags(target_p, NOCAPS, NOCAPS, n_tags, tags,
+			":%s BATCH +%s draft/multiline %s",
+			origin, batch->id, target_p->name);
+
+		RB_DLINK_FOREACH(ptr, batch->messages.head)
+		{
+			struct BatchMessage *data = ptr->data;
+			bool concat = msgbuf_get_tag(&data->msg, "draft/multiline-concat") != NULL;
+			sendto_one_tags(target_p, NOCAPS, NOCAPS, concat ? 2: 1, inner_tags,
+				"%s %s %s :%s",
+				origin, command, get_id(target_p, target_p), data->msg.para[2]);
+		}
+
+		sendto_one(target_p, ":%s BATCH -%s", origin, batch->id);
+	}
+	else
+	{
+		RB_DLINK_FOREACH(ptr, batch->messages.head)
+		{
+			struct BatchMessage *data = ptr->data;
+			if (EmptyString(data->msg.para[2]))
+				continue;
+
+			sendto_one_tags(target_p, NOCAPS, NOCAPS,
+				n_tags, tags, "%s %s %s :%s",
+				origin, command, get_id(target_p, target_p), data->msg.para[2]);
+
+			/* msgid should only be attached to the first message of the fallback */
+			if (msgid > -1)
+				tags[msgid].capmask = NOCAPS;
+		}
+	}
+
+	uint64_t CAP_ECHO = capability_get(serv_capindex, "ECHO", NULL);
+	uint64_t CAP_ECHOB = capability_get(serv_capindex, "ECHOB", NULL);
+	s_assert(CAP_ECHO != 0 && CAP_ECHOB != 0);
+	/* we'll get a remote echo if the target server supports ECHO but not MULTILINE **OR** if it supports both ECHOB and MULTILINE */
+	if (MyClient(target_p)
+		|| (IsServerCapable(target_p->from, CAP_ECHO) && NotServerCapable(target_p->from, CAP_MULTILINE))
+		|| IsServerCapable(target_p->from, CAP_ECHOB | CAP_MULTILINE))
+	{
+		/* echo the incoming batch tag rather than our synthesized one */
+		inner_tags[0].value = batch->tag;
+
+		/* send an echo batch here since the target's server won't send one */
+		const char *echo_prefix = MyClient(source_p) ? origin : get_id(target_p, source_p);
+		uint64_t serv_cap = NOCAPS;
+		if (MyClient(source_p))
+		{
+			if (NotClientCapable(source_p, CLICAP_ECHO_MESSAGE))
+				return;
+
+			sendto_one_tags(source_p, NOCAPS, NOCAPS, n_tags, tags,
+				":%s BATCH +%s draft/multiline %s",
+				echo_prefix, batch->tag, target_p->name);
+		}
+		else if (!MyClient(source_p))
+		{
+			char echo_batch_id[16];
+			generate_batch_id(echo_batch_id, sizeof(echo_batch_id));
+			struct MsgTag echo_batch = { "batch", echo_batch_id, CLICAP_BATCH };
+
+			serv_cap = CAP_ECHOB;
+			sendto_one_tags(source_p, serv_cap, NOCAPS, 0, NULL,
+				":%s BATCH +%s solanum.chat/echo %s",
+				echo_prefix, batch->id, use_id(source_p));
+
+			sendto_one_tags(source_p, serv_cap, NOCAPS, 1, &echo_batch,
+				":%s BATCH +%s draft/multiline %s",
+				echo_prefix, batch->tag, target_p->name);
+		}
+
+		RB_DLINK_FOREACH(ptr, batch->messages.head)
+		{
+			struct BatchMessage *data = ptr->data;
+			bool concat = msgbuf_get_tag(&data->msg, "draft/multiline-concat") != NULL;
+
+			sendto_one_tags(source_p, serv_cap, NOCAPS, concat ? 2 : 1, inner_tags,
+				":%s %s %s :%s",
+				echo_prefix, command, target_p->name, data->msg.para[2]);
+		}
+
+		sendto_one_tags(source_p, serv_cap, NOCAPS, 0, NULL,
+			":%s BATCH -%s", echo_prefix, batch->tag);
+	}
+}
+
+static void
 process_multiline(struct Client *client_p, struct Client *source_p, struct Batch *batch, void *unused)
 {
-	// TODO: break this monster of a method up into smaller parts
 	const char *target, *chtarget;
 	struct Client *target_p = NULL;
 	struct Channel *chptr = NULL;
-	int type = 0;
+	int type = ALL_MEMBERS;
 	enum message_type msgtype;
 	bool opmod = false;
 	unsigned int bytes = 0;
 	char *combined, *pos;
 	const char *command;
-	const char *prefix = "";
 	rb_dlink_node *ptr;
 
 	/* do they have the caps? */
@@ -224,26 +529,22 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 	}
 
 	target = chtarget = batch->start->msg.para[3];
-
 	/* statusmsg/eopmod? */
 	if (*target == '@')
 	{
-		type = CHFL_CHANOP;
+		type = ONLY_CHANOPS;
 		++chtarget;
-		prefix = "@";
 	}
 	else if (*target == '+')
 	{
-		type = CHFL_VOICE | CHFL_CHANOP;
+		type = ONLY_CHANOPSVOICED;
 		++chtarget;
-		prefix = "+";
 	}
 	else if (*target == '=' && IsServer(client_p))
 	{
-		type = CHFL_CHANOP;
+		type = ONLY_CHANOPS;
 		++chtarget;
 		opmod = true;
-		prefix = "@";
 	}
 
 	if (EmptyString(chtarget))
@@ -268,7 +569,7 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 			return;
 		}
 
-		if (type != 0 && !opmod)
+		if (type != ALL_MEMBERS && !opmod)
 		{
 			struct membership *msptr = find_channel_membership(chptr, source_p);
 			if (!IsServer(source_p) && !IsService(source_p) && !is_chanop_voiced(msptr))
@@ -281,7 +582,7 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 			}
 		}
 	}
-	else if (type != 0)
+	else if (type != ALL_MEMBERS)
 	{
 		/* given a statusmsg prefix but what follows isn't a valid channel name */
 		sendto_one_numeric(source_p, ERR_NOSUCHNICK,
@@ -323,15 +624,12 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 	 */
 	char msgid[BUFSIZE] = {0};
 	const char *generated_msgid;
-	int have_msgid = 0;
+	bool have_msgid = false;
 
 	/* Validate the rest of the batch before sending any text out.
 	 * We need to ensure it stays under max-bytes, commands are valid, targets match,
 	 * and then give hooks a chance to filter or modify the message.
-	 * To ensure multiline can't be used to bypass spamfilter,
-	 * the full string *and* each individual line get sent to hooks.
 	 */
-	combined = pos = rb_malloc(max_bytes + 1);
 	RB_DLINK_FOREACH(ptr, batch->messages.head)
 	{
 		struct BatchMessage *data = ptr->data;
@@ -340,7 +638,6 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 			if (MyClient(source_p))
 				sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID :multiline batch must only have either PRIVMSG or NOTICE commands",
 					me.name);
-			rb_free(combined);
 			return;
 		}
 
@@ -349,7 +646,6 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 			if (MyClient(source_p))
 				sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID_TARGET %s %s :mismatched target within multiline batch",
 					me.name, target, data->msg.para[1]);
-			rb_free(combined);
 			return;
 		}
 
@@ -359,10 +655,10 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 			if (MyClient(source_p))
 				sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID :multiline batch cannot contain CTCP",
 					me.name);
-			rb_free(combined);
 			return;
 		}
 
+		bool text_changed = false;
 		if (target_p != NULL)
 		{
 			hook_data_privmsg_user hdata = { msgtype, source_p, target_p, text, 0, &data->msg };
@@ -370,28 +666,13 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 			if (hdata.approved != 0)
 			{
 				/* assume the hook took care of sending the user any appropriate error message */
-				rb_free(combined);
 				return;
 			}
 
 			if (text != hdata.text)
 			{
 				text = hdata.text;
-				/* save off updated text in the original MsgBuf */
-				size_t newlen = strlen(text) + 1;
-				char *tmp = rb_malloc(data->datalen + newlen);
-				memcpy(tmp, data->data, data->datalen);
-				strcpy(tmp + data->datalen, text);
-				data->msg.para[2] = tmp + data->datalen;
-				rb_free(data->data);
-				data->data = tmp;
-				data->datalen += newlen;
-			}
-
-			if (!have_msgid && (generated_msgid = msgbuf_get_tag(&data->msg, "msgid")) != NULL)
-			{
-				have_msgid = 1;
-				strncpy(msgid, generated_msgid, sizeof(msgid) - 1);
+				text_changed = true;
 			}
 		}
 		else
@@ -401,29 +682,33 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 			if (hdata.approved != 0)
 			{
 				/* assume the hook took care of sending the user any appropriate error message */
-				rb_free(combined);
 				return;
 			}
 
 			if (text != hdata.text)
 			{
 				text = hdata.text;
-				/* save off updated text in the original MsgBuf */
-				size_t newlen = strlen(text) + 1;
-				char *tmp = rb_malloc(data->datalen + newlen);
-				memcpy(tmp, data->data, data->datalen);
-				strcpy(tmp + data->datalen, text);
-				data->msg.para[2] = tmp + data->datalen;
-				rb_free(data->data);
-				data->data = tmp;
-				data->datalen += newlen;
+				text_changed = true;
 			}
+		}
 
-			if (!have_msgid && (generated_msgid = msgbuf_get_tag(&data->msg, "msgid")) != NULL)
-			{
-				have_msgid = 1;
-				strncpy(msgid, generated_msgid, sizeof(msgid) - 1);
-			}
+		if (text_changed)
+		{
+			/* save off updated text in the original MsgBuf */
+			size_t newlen = strlen(text) + 1;
+			char *tmp = rb_malloc(data->datalen + newlen);
+			memcpy(tmp, data->data, data->datalen);
+			strcpy(tmp + data->datalen, text);
+			data->msg.para[2] = tmp + data->datalen;
+			rb_free(data->data);
+			data->data = tmp;
+			data->datalen += newlen;
+		}
+
+		if (!have_msgid && (generated_msgid = msgbuf_get_tag(&data->msg, "msgid")) != NULL)
+		{
+			have_msgid = true;
+			rb_strlcpy(msgid, generated_msgid, sizeof(msgid));
 		}
 
 		size_t len = strlen(text);
@@ -437,7 +722,6 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 		{
 			sendto_one(source_p, ":%s FAIL BATCH MULTILINE_MAX_BYTES %d :multiline batch contains too many bytes",
 				me.name, max_bytes);
-			rb_free(combined);
 			return;
 		}
 
@@ -446,10 +730,17 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 			if (MyClient(source_p))
 				sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID :cannot send blank line with draft/multiline-concat",
 					me.name);
-			rb_free(combined);
 			return;
 		}
+	}
 
+	combined = pos = rb_malloc(bytes + 1);
+	RB_DLINK_FOREACH(ptr, batch->messages.head)
+	{
+		struct BatchMessage *data = ptr->data;
+		const char *text = data->msg.para[2];
+		size_t len = strlen(text);
+		bool concat = msgbuf_get_tag(&data->msg, "draft/multiline-concat") != NULL;
 		if (ptr != batch->messages.head && !concat)
 			*pos++ = '\n';
 
@@ -475,97 +766,7 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 			return;
 		}
 
-		char origin[USERHOST_REPLYLEN];
-		snprintf(origin, sizeof(origin), IsPerson(source_p) ? "%s!%s@%s" : "%s",
-			get_id(source_p, target_p), source_p->username, source_p->host);
-
-		target = MyClient(target_p) ? target_p->name : use_id(target_p);
-		struct MsgTag tags[] = {
-			{ "batch", batch->id, CLICAP_BATCH },
-			{ "draft/multiline-concat", NULL, CLICAP_MULTILINE },
-		};
-
-		if ((MyClient(target_p) && IsClientCapable(target_p, (CLICAP_MULTILINE | CLICAP_BATCH)))
-			|| (!MyClient(target_p) && IsServerCapable(target_p->from, CAP_MULTILINE)))
-		{
-			sendto_one_tags(target_p, NOCAPS, NOCAPS, batch_msgbuf.n_tags, batch_msgbuf.tags,
-				":%s BATCH +%s draft/multiline %s",
-				origin, batch->id, target_p->name);
-
-			RB_DLINK_FOREACH(ptr, batch->messages.head)
-			{
-				struct BatchMessage *data = ptr->data;
-				bool concat = msgbuf_get_tag(&data->msg, "draft/multiline-concat") != NULL;
-				sendto_one_tags(target_p, NOCAPS, NOCAPS, concat ? 2: 1, tags,
-					"%s %s %s :%s",
-					origin, msgtype == MESSAGE_TYPE_PRIVMSG ? "PRIVMSG": "NOTICE",
-					target, data->msg.para[2]);
-			}
-
-			sendto_one(target_p, ":%s BATCH -%s", origin, batch->id);
-		}
-		else
-		{
-			RB_DLINK_FOREACH(ptr, batch->messages.head)
-			{
-				struct BatchMessage *data = ptr->data;
-				if (EmptyString(data->msg.para[2]))
-					continue;
-
-				sendto_one_tags(target_p, NOCAPS, NOCAPS,
-					batch_msgbuf.n_tags, batch_msgbuf.tags, "%s %s %s :%s",
-					origin, msgtype == MESSAGE_TYPE_PRIVMSG ? "PRIVMSG": "NOTICE", target, data->msg.para[2]);
-
-				/* msgid should only be attached to the first message of the fallback */
-				if (have_msgid && !strcmp(batch_msgbuf.tags[0].key, "msgid"))
-					batch_msgbuf.tags[0].capmask = NOCAPS;
-			}
-		}
-
-		uint64_t CAP_ECHO = capability_get(serv_capindex, "ECHO", NULL);
-		uint64_t CAP_ECHOB = capability_get(serv_capindex, "ECHOB", NULL);
-		s_assert(CAP_ECHO != 0 && CAP_ECHOB != 0);
-		/* we'll get a remote echo if the target server supports ECHO but not MULTILINE **OR** if it supports both ECHOB and MULTILINE */
-		if (MyClient(target_p)
-			|| (IsServerCapable(target_p->from, CAP_ECHO) && NotServerCapable(target_p->from, CAP_MULTILINE))
-			|| IsServerCapable(target_p->from, CAP_ECHOB | CAP_MULTILINE))
-		{
-			/* echo the incoming batch tag rather than our synthesized one */
-			tags[0].value = batch->tag;
-
-			/* send an echo batch here since the target's server won't send one */
-			uint64_t serv_cap = NOCAPS;
-			if (MyClient(source_p))
-			{
-				if (NotClientCapable(source_p, CLICAP_ECHO_MESSAGE))
-					return;
-
-				sendto_one_tags(source_p, NOCAPS, NOCAPS, batch_msgbuf.n_tags, batch_msgbuf.tags,
-					":%s BATCH +%s draft/multiline %s",
-					origin, batch->tag, target_p->name);
-			}
-			else if (!MyClient(source_p))
-			{
-				serv_cap = CAP_ECHOB;
-				sendto_one_tags(source_p, serv_cap, NOCAPS, batch_msgbuf.n_tags, batch_msgbuf.tags,
-					":%s BATCH +%s solanum.chat/echo draft/multiline %s",
-					origin, batch->tag, target_p->name);
-			}
-
-			RB_DLINK_FOREACH(ptr, batch->messages.head)
-			{
-				struct BatchMessage *data = ptr->data;
-				bool concat = msgbuf_get_tag(&data->msg, "draft/multiline-concat") != NULL;
-
-				sendto_one_tags(source_p, serv_cap, NOCAPS, concat ? 2 : 1, tags,
-					":%s %s %s :%s",
-					origin, msgtype == MESSAGE_TYPE_PRIVMSG ? "PRIVMSG": "NOTICE",
-					target_p->name, data->msg.para[2]);
-			}
-
-			sendto_one_tags(source_p, serv_cap, NOCAPS, 0, NULL,
-				":%s BATCH -%s", origin, batch->tag);
-		}
+		send_private_batch(client_p, source_p, target_p, batch, batch_msgbuf.n_tags, batch_msgbuf.tags);
 	}
 	else if (chptr != NULL)
 	{
@@ -578,165 +779,7 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 			return;
 		}
 
-		char origin[USERHOST_REPLYLEN];
-		snprintf(origin, sizeof(origin), IsPerson(source_p) ? "%s!%s@%s" : "%s",
-			source_p->name, source_p->username, source_p->host);
-
-		struct MsgTag tags[3] = {
-			{ "batch", batch->id, CLICAP_BATCH },
-			{ "draft/multiline-concat", NULL, CLICAP_MULTILINE }
-		};
-
-		int result = can_send(chptr, source_p, NULL);
-		if (result)
-		{
-			if (result != CAN_SEND_OPV && MyClient(source_p)
-				&& !IsOperGeneral(source_p) && !add_channel_target(source_p, chptr))
-			{
-				sendto_one(source_p, form_str(ERR_TARGCHANGE),
-					me.name, source_p->name, chptr->chname);
-				return;
-			}
-
-			if (result != CAN_SEND_OPV && flood_attack_channel(msgtype, source_p, chptr, chptr->chname))
-				return;
-		}
-		else if (chptr->mode.mode & MODE_OPMODERATE
-			&& (!(chptr->mode.mode & MODE_NOPRIVMSGS) || IsMember(source_p, chptr)))
-		{
-			if (MyClient(source_p) && !IsOperGeneral(source_p) && !add_channel_target(source_p, chptr))
-			{
-				sendto_one(source_p, form_str(ERR_TARGCHANGE),
-					me.name, source_p->name, chptr->chname);
-				return;
-			}
-
-			if (!flood_attack_channel(msgtype, source_p, chptr, chptr->chname))
-			{
-				opmod = true;
-				type = CHFL_CHANOP;
-				prefix = "@";
-			}
-		}
-		else
-		{
-			if (msgtype != MESSAGE_TYPE_NOTICE)
-				sendto_one_numeric(source_p, ERR_CANNOTSENDTOCHAN,
-					form_str(ERR_CANNOTSENDTOCHAN), chptr->chname);
-		}
-
-		unsigned int servcaps = NOCAPS;
-		if (type != 0)
-			servcaps |= CAP_CHW;
-
-		sendto_channel_local_with_capability_butone_tags(source_p, type, CLICAP_BATCH, NOCAPS,
-			chptr, batch_msgbuf.n_tags, batch_msgbuf.tags, ":%s BATCH +%s draft/multiline %s%s",
-			origin, batch->id, prefix, chptr->chname);
-
-		if (opmod)
-		{
-			sendto_match_servs_tags(source_p, "*", CAP_MULTILINE | CAP_STAG | CAP_EOPMOD | servcaps, NOCAPS,
-				batch_msgbuf.n_tags, batch_msgbuf.tags, "BATCH +%s draft/multiline =%s",
-				batch->id, chptr->chname);
-
-			sendto_match_servs_tags(source_p->servptr, "*", CAP_MULTILINE | CAP_STAG | servcaps, CAP_EOPMOD,
-				batch_msgbuf.n_tags, batch_msgbuf.tags, "BATCH +%s draft/multiline @%s",
-				batch->id, chptr->chname);
-		}
-		else
-			sendto_match_servs_tags(source_p, "*", CAP_MULTILINE | CAP_STAG | servcaps, NOCAPS,
-				batch_msgbuf.n_tags, batch_msgbuf.tags, "BATCH +%s draft/multiline %s%s",
-				batch->id, prefix, chptr->chname);
-
-		RB_DLINK_FOREACH(ptr, batch->messages.head)
-		{
-			struct BatchMessage *data = ptr->data;
-			bool concat = msgbuf_get_tag(&data->msg, "draft/multiline-concat") != NULL;
-
-			sendto_channel_local_with_capability_butone_tags(source_p, type, CLICAP_BATCH | CLICAP_MULTILINE, NOCAPS,
-				chptr, concat ? 3 : 2, tags, ":%s %s %s%s :%s",
-				origin, msgtype == MESSAGE_TYPE_PRIVMSG ? "PRIVMSG": "NOTICE", prefix, chptr->chname, data->msg.para[2]);
-
-			if (opmod)
-			{
-				sendto_match_servs_tags(source_p, "*", CAP_MULTILINE | CAP_STAG | CAP_EOPMOD | servcaps, NOCAPS,
-					concat ? 3 : 2, tags, "%s =%s :%s",
-					msgtype == MESSAGE_TYPE_PRIVMSG ? "PRIVMSG": "NOTICE", chptr->chname, data->msg.para[2]);
-
-				sendto_match_servs_tags(source_p->servptr, "*", CAP_MULTILINE | CAP_STAG | servcaps, CAP_EOPMOD,
-					concat ? 3 : 2, tags, "NOTICE @%s :<%s:%s> %s",
-					chptr->chname, source_p->name, chptr->chname, data->msg.para[2]);
-			}
-			else
-				sendto_match_servs_tags(source_p, "*", CAP_MULTILINE | CAP_STAG | servcaps, NOCAPS,
-					concat ? 3 : 2, tags, "%s %s%s :%s",
-					msgtype == MESSAGE_TYPE_PRIVMSG ? "PRIVMSG": "NOTICE", prefix, chptr->chname, data->msg.para[2]);
-
-			/* lot of different fallback scenarios for clients who don't support both batch and multiline */
-			if (EmptyString(data->msg.para[2]))
-				continue;
-
-			sendto_channel_local_with_capability_butone_tags(source_p, type, CLICAP_BATCH, CLICAP_MULTILINE,
-				chptr, 2, tags, ":%s %s %s%s :%s",
-				origin, msgtype == MESSAGE_TYPE_PRIVMSG ? "PRIVMSG": "NOTICE", prefix, chptr->chname, data->msg.para[2]);
-
-			sendto_channel_local_with_capability_butone_tags(source_p, type, NOCAPS, CLICAP_BATCH,
-				chptr, batch_msgbuf.n_tags, batch_msgbuf.tags, ":%s %s %s%s :%s",
-				origin, msgtype == MESSAGE_TYPE_PRIVMSG ? "PRIVMSG": "NOTICE", prefix, chptr->chname, data->msg.para[2]);
-
-			if (opmod)
-			{
-				sendto_match_servs_tags(source_p, "*", CAP_EOPMOD | servcaps, CAP_MULTILINE,
-					batch_msgbuf.n_tags, batch_msgbuf.tags, "%s =%s :%s",
-					msgtype == MESSAGE_TYPE_PRIVMSG ? "PRIVMSG": "NOTICE", chptr->chname, data->msg.para[2]);
-
-				sendto_match_servs_tags(source_p->servptr, "*", servcaps, CAP_MULTILINE | CAP_EOPMOD,
-					batch_msgbuf.n_tags, batch_msgbuf.tags, "NOTICE @%s :<%s:%s> %s",
-					chptr->chname, source_p->name, chptr->chname, data->msg.para[2]);
-			}
-			else
-				sendto_match_servs_tags(source_p, "*", servcaps, CAP_MULTILINE,
-					batch_msgbuf.n_tags, batch_msgbuf.tags, "%s %s%s :%s",
-					msgtype == MESSAGE_TYPE_PRIVMSG ? "PRIVMSG": "NOTICE",
-					prefix, chptr->chname, data->msg.para[2]);
-
-			/* msgid should only be attached to the first message of the fallback */
-			if (have_msgid && !strcmp(batch_msgbuf.tags[0].key, "msgid"))
-				batch_msgbuf.tags[0].capmask = 0;
-		}
-
-		sendto_channel_local_with_capability_butone(source_p, type, CLICAP_BATCH, NOCAPS,
-			chptr, ":%s BATCH -%s", origin, batch->id);
-
-		sendto_match_servs(source_p, "*", CAP_MULTILINE | CAP_STAG | servcaps, NOCAPS,
-			"BATCH -%s", batch->id);
-
-		/* send an echo-message */
-		if (MyClient(source_p) && IsClientCapable(source_p, CLICAP_ECHO_MESSAGE))
-		{
-			if (have_msgid && !strcmp(batch_msgbuf.tags[0].key, "msgid"))
-				batch_msgbuf.tags[0].capmask = CLICAP_MESSAGE_TAGS;
-
-			/* echo the incoming batch tag rather than our synthesized one */
-			tags[0].value = batch->tag;
-
-			sendto_one_tags(source_p, NOCAPS, NOCAPS, batch_msgbuf.n_tags, batch_msgbuf.tags,
-				":%s BATCH +%s draft/multiline %s%s",
-				origin, batch->tag, prefix, chptr->chname);
-
-			RB_DLINK_FOREACH(ptr, batch->messages.head)
-			{
-				struct BatchMessage *data = ptr->data;
-				bool concat = msgbuf_get_tag(&data->msg, "draft/multiline-concat") != NULL;
-
-				sendto_one_tags(source_p, NOCAPS, NOCAPS, concat ? 3 : 2, tags,
-					":%s %s %s%s :%s",
-					origin, msgtype == MESSAGE_TYPE_PRIVMSG ? "PRIVMSG": "NOTICE",
-					prefix, chptr->chname, data->msg.para[2]);
-			}
-
-			sendto_one(source_p, ":%s BATCH -%s", origin, batch->tag);
-		}
+		send_channel_batch(client_p, source_p, chptr, type, opmod, batch, batch_msgbuf.n_tags, batch_msgbuf.tags);
 	}
 }
 
