@@ -184,7 +184,10 @@ parse(struct Client *client_p, char *pbuffer, char *bufend)
 			break;
 
 		case MESSAGE_TAG_DROP:
-			/* entire message is rejected, don't send at all */
+			/* entire message is rejected, don't send at all;
+			 * call parse_end in case any cleanup is needed for tags already processed
+			 */
+			call_hook(h_parse_end, NULL);
 			return;
 		}
 	}
@@ -203,23 +206,21 @@ parse(struct Client *client_p, char *pbuffer, char *bufend)
 	else
 	{
 		mptr = rb_dictionary_retrieve(cmd_dict, msgbuf.cmd);
-
-		/* no command or its encap only, error */
-		if(!mptr || !mptr->cmd)
-		{
-			if(IsPerson(from))
-			{
-				sendto_one(from, form_str(ERR_UNKNOWNCOMMAND),
-					   me.name, from->name, msgbuf.cmd);
-			}
-			ServerStats.is_unco++;
-			return;
-		}
+		numeric = -1;
 	}
 
-	if (mptr == NULL)
+	if (numeric != -1)
 	{
 		do_numeric(numeric, client_p, from, &updated_msg);
+	}
+	else if (!mptr || !mptr->cmd)
+	{
+		/* no command or its encap only, error */
+		if (IsPerson(from))
+			sendto_one(from, form_str(ERR_UNKNOWNCOMMAND),
+				   me.name, from->name, msgbuf.cmd);
+
+		ServerStats.is_unco++;
 	}
 	else if (handle_command(mptr, &updated_msg, client_p, from) < -1)
 	{
