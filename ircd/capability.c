@@ -96,6 +96,13 @@ capability_put(struct CapabilityIndex *idx, const char *cap, void *ownerdata)
 	if (idx->highest_bit % (sizeof(uint64_t) * 8) == 0)
 		idx->highest_bit = 0;
 
+	if (idx == cli_capindex
+			&& entry->ownerdata != NULL
+			&& (((struct ClientCapability *)entry->ownerdata)->flags & CLICAP_FLAGS_NOPROP) == CLICAP_FLAGS_NOPROP)
+	{
+		serv_clicapmask &= ~(1ull << entry->value);
+	}
+
 	return (1ull << entry->value);
 }
 
