@@ -94,6 +94,18 @@ send_linebuf(struct Client *to, buf_head_t *linebuf)
 		rb_linebuf_attach(&to->localClient->buf_sendq, linebuf);
 	}
 
+	rb_dlink_node *ptr;
+	RB_DLINK_FOREACH(ptr, linebuf->list.head)
+	{
+		buf_line_t *line = ptr->data;
+		/* strip CRLF temporarily */
+		if (line->terminated)
+			line->buf[line->len - 2] = '\0';
+		idebug("SEND: [%s] %s", to->name, line->buf);
+		if (line->terminated)
+			line->buf[line->len - 2] = '\r';
+	}
+
 	/*
 	 ** Update statistics. The following is slightly incorrect
 	 ** because it counts messages even if queued, but bytes
