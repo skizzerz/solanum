@@ -94,6 +94,18 @@ send_linebuf(struct Client *to, buf_head_t *linebuf)
 		rb_linebuf_attach(&to->localClient->buf_sendq, linebuf);
 	}
 
+	rb_dlink_node *ptr;
+	RB_DLINK_FOREACH(ptr, linebuf->list.head)
+	{
+		buf_line_t *line = ptr->data;
+		/* strip CRLF temporarily */
+		if (line->terminated)
+			line->buf[line->len - 2] = '\0';
+		idebug("SEND: [%s] %s", to->name, line->buf);
+		if (line->terminated)
+			line->buf[line->len - 2] = '\r';
+	}
+
 	/*
 	 ** Update statistics. The following is slightly incorrect
 	 ** because it counts messages even if queued, but bytes
@@ -115,7 +127,6 @@ send_linebuf(struct Client *to, buf_head_t *linebuf)
 static int
 send_msgbuf(struct Client *target_p, struct MsgBuf *msgbuf)
 {
-	rb_dlink_node *ptr;
 	buf_head_t linebuf;
 	struct MsgBuf_str_data data = { .msgbuf = msgbuf, .caps = CLIENT_CAP_MASK(target_p) };
 	rb_strf_t strings = { .func = msgbuf_unparse_linebuf, .func_args = &data, .next = NULL };
@@ -123,16 +134,6 @@ send_msgbuf(struct Client *target_p, struct MsgBuf *msgbuf)
 	rb_linebuf_newbuf(&linebuf);
 	rb_linebuf_put(&linebuf, &strings);
 	int val = send_linebuf(MyClient(target_p) ? target_p : target_p->from, &linebuf);
-	RB_DLINK_FOREACH(ptr, linebuf.list.head)
-	{
-		buf_line_t *line = ptr->data;
-		/* strip CRLF temporarily */
-		if (line->terminated)
-			line->buf[line->len - 2] = '\0';
-		idebug("SEND: [%s] %s", target_p->name, line->buf);
-		if (line->terminated)
-			line->buf[line->len - 2] = '\r';
-	}
 	rb_linebuf_donebuf(&linebuf);
 
 	return val;
