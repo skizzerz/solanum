@@ -99,6 +99,7 @@ parse(struct Client *client_p, char *pbuffer, char *bufend)
 	if(*end == '\r')
 		*end = '\0';
 
+	idebug("PARSE: [%s] %s", client_p->name, pbuffer);
 	res = msgbuf_parse(&msgbuf, pbuffer);
 	if (res)
 	{
