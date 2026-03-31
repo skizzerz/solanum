@@ -600,6 +600,17 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 		}
 	}
 
+	/* received from remote server, send it along without repeating validation/hooks */
+	if (IsServer(client_p))
+	{
+		if (target_p != NULL)
+			send_private_batch(client_p, source_p, target_p, batch, batch->start->msg.n_tags, batch->start->msg.tags);
+		else if (chptr != NULL)
+			send_channel_batch(client_p, source_p, chptr, type, opmod, batch, batch->start->msg.n_tags, batch->start->msg.tags);
+
+		return;
+	}
+
 	/* determine if this is a PRIVMSG or a NOTICE batch */
 	command = ((struct BatchMessage *)batch->messages.head->data)->msg.cmd;
 	if (!rb_strcasecmp("PRIVMSG", command))
@@ -635,26 +646,23 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 		struct BatchMessage *data = ptr->data;
 		if (rb_strcasecmp(command, data->msg.cmd) != 0)
 		{
-			if (MyClient(source_p))
-				sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID :multiline batch must only have either PRIVMSG or NOTICE commands",
-					me.name);
+			sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID :multiline batch must only have either PRIVMSG or NOTICE commands",
+				me.name);
 			return;
 		}
 
 		if (irccmp(target, data->msg.para[1]) != 0)
 		{
-			if (MyClient(source_p))
-				sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID_TARGET %s %s :mismatched target within multiline batch",
-					me.name, target, data->msg.para[1]);
+			sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID_TARGET %s %s :mismatched target within multiline batch",
+				me.name, target, data->msg.para[1]);
 			return;
 		}
 
 		const char *text = data->msg.para[2];
 		if (*text == '\x01')
 		{
-			if (MyClient(source_p))
-				sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID :multiline batch cannot contain CTCP",
-					me.name);
+			sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID :multiline batch cannot contain CTCP",
+				me.name);
 			return;
 		}
 
@@ -718,7 +726,7 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 		if (ptr != batch->messages.head && !concat)
 			bytes++;
 
-		if (MyClient(source_p) && bytes > max_bytes)
+		if (bytes > max_bytes)
 		{
 			sendto_one(source_p, ":%s FAIL BATCH MULTILINE_MAX_BYTES %d :multiline batch contains too many bytes",
 				me.name, max_bytes);
@@ -727,9 +735,8 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 
 		if (len == 0 && concat)
 		{
-			if (MyClient(source_p))
-				sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID :cannot send blank line with draft/multiline-concat",
-					me.name);
+			sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID :cannot send blank line with draft/multiline-concat",
+				me.name);
 			return;
 		}
 	}
