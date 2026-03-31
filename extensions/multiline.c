@@ -143,7 +143,7 @@ multiline_rehash(void *data)
 	if (old_max_bytes != max_bytes || old_max_lines != max_lines)
 	{
 		/* notify cap-notify clients of the new limits */
-		sendto_local_clients_with_capability(CLICAP_CAP_NOTIFY, "%s CAP * NEW :draft/multiline=%s",
+		sendto_local_clients_with_capability(CLICAP_CAP_NOTIFY, ":%s CAP * NEW :draft/multiline=%s",
 			me.name, capdata_buf);
 	}
 }
