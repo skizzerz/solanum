@@ -531,6 +531,8 @@ static void safelist_iterate_client(struct Client *source_p)
 {
 	struct Channel *chptr;
 	rb_radixtree_iteration_state iter;
+	struct ResponseInfo *orig_outgoing_response_info = outgoing_response_info;
+	outgoing_response_info = source_p->localClient->safelist_data->response_info;
 
 	RB_RADIXTREE_FOREACH_FROM(chptr, &iter, channel_tree, source_p->localClient->safelist_data->chname)
 	{
@@ -538,6 +540,7 @@ static void safelist_iterate_client(struct Client *source_p)
 		{
 			rb_free(source_p->localClient->safelist_data->chname);
 			source_p->localClient->safelist_data->chname = rb_strdup(chptr->chname);
+			outgoing_response_info = orig_outgoing_response_info;
 
 			return;
 		}
@@ -545,6 +548,7 @@ static void safelist_iterate_client(struct Client *source_p)
 		safelist_one_channel(source_p, chptr, source_p->localClient->safelist_data);
 	}
 
+	outgoing_response_info = orig_outgoing_response_info;
 	safelist_client_release(source_p);
 }
 
