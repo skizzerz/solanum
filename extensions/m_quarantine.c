@@ -173,10 +173,8 @@ me_quarantine(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *s
 		return;
 	}
 
-	if (!MyClient(target_p))
-		return;
-
-	add_quarantine(source_p, target_p, parv[2]);
+	if (MyClient(target_p))
+		add_quarantine(source_p, target_p, parv[2]);
 }
 
 static void
@@ -212,10 +210,8 @@ me_unquarantine(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client 
 		return;
 	}
 
-	if (!MyClient(target_p))
-		return;
-
-	remove_quarantine(source_p, target_p);
+	if (MyClient(target_p))
+		remove_quarantine(source_p, target_p);
 }
 
 static void
