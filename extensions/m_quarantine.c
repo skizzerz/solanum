@@ -38,7 +38,7 @@
 #define IsQuarantined(x) ((x)->umodes & user_modes['q'])
 #define DEFAULT_JOIN_REASON "Cannot join channel (usermode +q) - you need to be logged into your NickServ account"
 #define DEFAULT_MSG_REASON "Cannot send to nick/channel (usermode +q) - you need to be logged into your NickServ account"
-#define DEFAULT_OTHER_MSG_REASON "they are quarantined and will be unable to respond to you"
+#define DEFAULT_OTHER_MSG_REASON "Cannot send to user - they are quarantined and will be unable to respond to you"
 #define DEFAULT_APPLY_MSG "You have been quarantined and must log into your NickServ account before you can join channels. Please see /STATS p for assistance."
 #define DEFAULT_REMOVE_MSG "You are no longer quarantined and can freely join channels."
 
@@ -509,10 +509,10 @@ quarantine_privmsg_user(void *data_)
 		if (IsQuarantined(data->target_p) && !IsOper(data->source_p) && !IsService(data->source_p))
 		{
 			if (data->msgtype == MESSAGE_TYPE_PRIVMSG)
-				sendto_one_numeric(data->source_p, ERR_CANNOTSENDTOUSER, form_str(ERR_CANNOTSENDTOUSER),
+				sendto_one_numeric(data->source_p, ERR_CANNOTSENDTOCHAN, "%s :%s",
 					data->target_p->name,
 					EmptyString(other_msg_reason) ? DEFAULT_OTHER_MSG_REASON : other_msg_reason);
-			data->approved = ERR_CANNOTSENDTOUSER;
+			data->approved = ERR_CANNOTSENDTOCHAN;
 		}
 		return;
 	}
@@ -541,20 +541,17 @@ quarantine_reset_conf(void *unused)
 		allowed_channels = NULL;
 	}
 
-	if (apply_msg != NULL)
-		rb_free(apply_msg);
+	rb_free(apply_msg);
+	rb_free(join_reason);
+	rb_free(msg_reason);
+	rb_free(other_msg_reason);
+	rb_free(remove_msg);
 
-	if (join_reason != NULL)
-		rb_free(join_reason);
-
-	if (msg_reason != NULL)
-		rb_free(msg_reason);
-
-	if (other_msg_reason != NULL)
-		rb_free(other_msg_reason);
-
-	if (remove_msg != NULL)
-		rb_free(remove_msg);
+	apply_msg = NULL;
+	join_reason = NULL;
+	msg_reason = NULL;
+	other_msg_reason = NULL;
+	remove_msg = NULL;
 }
 
 static void
