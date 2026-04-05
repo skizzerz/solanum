@@ -70,6 +70,7 @@ static void
 tag_reply_allow(void *data_)
 {
 	hook_data_message_tag *data = data_;
+	const char *target = data->message->para[1];
 
 	if (strcmp("+reply", data->key) != 0 || EmptyString(data->value))
 		return;
@@ -94,19 +95,17 @@ tag_reply_allow(void *data_)
 			return;
 
 		/* message lacking a target or sent to multiple targets? */
-		if (data->message->n_para < 2
-			|| EmptyString(data->message->para[1])
-			|| strchr(data->message->para[1], ',') != NULL)
+		if (data->message->n_para < 2 || EmptyString(target) || strchr(target, ',') != NULL)
 		{
 			return;
 		}
 
 		/* check if the target is a channel (possibly a statusmsg) */
 		const char *ch_target = NULL;
-		if (IsChannelName(data->message->para[1]))
-			ch_target = data->message->para[1];
-		else if (IsChannelName(data->message->para[1] + 1))
-			ch_target = data->message->para[1] + 1;
+		if (IsChannelName(target))
+			ch_target = target;
+		else if ((*target == '@' || *target == '+') && IsChannelName(target + 1))
+			ch_target = target + 1;
 
 		/* PMs have an idlen of exactly 29, channel messages are always > 29 */
 		if ((ch_target == NULL) ^ (idlen == MSGID_LEN_MIN))
@@ -115,10 +114,11 @@ tag_reply_allow(void *data_)
 		/* quick validation of msgid portion before channel name */
 		for (int i = 1; i < 29; i++)
 		{
-			if (i < 20 && !isdigit(data->value[i]))
-				return;
-			if (i >= 20 && !isupper(data->value[i]) && !isdigit(data->value[i]))
-				return;
+			if (isdigit(data->value[i]))
+				continue;
+			if (i >= 20 && isupper(data->value[i]))
+				continue;
+			return;
 		}
 
 		if (ch_target != NULL)
@@ -135,8 +135,7 @@ tag_reply_allow(void *data_)
 			if (!is_match)
 				return;
 
-			struct Channel *chptr = find_channel(ch_target);
-			if (chptr == NULL)
+			if (find_channel(ch_target)== NULL)
 				return;
 		}
 	}
