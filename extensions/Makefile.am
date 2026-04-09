@@ -59,6 +59,7 @@ extension_LTLIBRARIES =		\
   m_shedding.la			\
   m_webirc.la			\
   multiline.la          \
+  network_icon.la		\
   no_kill_services.la		\
   no_locops.la			\
   no_oper_invis.la		\
