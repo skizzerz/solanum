@@ -66,5 +66,6 @@ network_icon_init_conf(void *data)
 static void
 network_icon_conf_set_url(void *data)
 {
-	network_icon_url = data;
+	rb_free(network_icon_url);
+	network_icon_url = rb_strdup(data);
 }
