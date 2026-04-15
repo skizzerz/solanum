@@ -43,6 +43,7 @@
 #include "inline/stringops.h"
 #include "msgbuf.h"
 #include "newconf.h"
+#include "logger.h"
 
 #include <hs_common.h>
 #include <hs_runtime.h>
@@ -128,9 +129,22 @@ DECLARE_MODULE_AV2(filter, modinit, moddeinit, filter_clist, NULL, filter_hfnlis
 static int
 modinit(void)
 {
-	filter_umode = user_modes['u'] = find_umode_slot();
-	construct_umodebuf();
+	filter_umode = find_umode_slot();
+	if (!filter_umode)
+	{
+		ierror("filter: unable to allocate umode slot for +u, unloading module");
+		return -1;
+	}
+
 	filter_chmode = cflag_add('u', chm_simple);
+	if (!filter_chmode)
+	{
+		ierror("filter: unable to allocate cmode slot for +u, unloading module");
+		return -1;
+	}
+
+	user_modes['u'] = filter_umode;
+	construct_umodebuf();
 	add_conf_item("general", "filter_sees_user_info", CF_YESNO, filter_conf_set_sees_user_info);
 	add_conf_item("general", "filter_bypass_all", CF_YESNO, filter_conf_set_bypass_all);
 	add_conf_item("general", "filter_exit_message", CF_QSTRING, filter_conf_set_exit_message);
@@ -140,20 +154,13 @@ modinit(void)
 static void
 moddeinit(void)
 {
-	if (filter_umode) {
-		user_modes['u'] = 0;
-		construct_umodebuf();
-	}
-	if (filter_chmode)
-		cflag_orphan('u');
-	if (filter_scratch)
-		hs_free_scratch(filter_scratch);
-	if (filter_db)
-		hs_free_database(filter_db);
-	if (filter_data)
-		rb_free(filter_data);
-	if (filter_exit_message)
-		rb_free(filter_exit_message);
+	user_modes['u'] = 0;
+	construct_umodebuf();
+	cflag_orphan('u');
+	hs_free_scratch(filter_scratch);
+	hs_free_database(filter_db);
+	rb_free(filter_data);
+	rb_free(filter_exit_message);
 	remove_conf_item("general", "filter_sees_user_info");
 	remove_conf_item("general", "filter_bypass_all");
 	remove_conf_item("general", "filter_exit_message");
@@ -162,11 +169,8 @@ moddeinit(void)
 static void
 filter_init_conf(void *data)
 {
-	if (filter_exit_message)
-	{
-		rb_free(filter_exit_message);
-		filter_exit_message = NULL;
-	}
+	rb_free(filter_exit_message);
+	filter_exit_message = NULL;
 }
 
 static void
@@ -217,7 +221,8 @@ filter_conf_set_bypass_all(void *data)
 static void
 filter_conf_set_exit_message(void *data)
 {
-	filter_exit_message = (char *)data;
+	rb_free(filter_exit_message);
+	filter_exit_message = rb_strdup(data);
 }
 
 static int
