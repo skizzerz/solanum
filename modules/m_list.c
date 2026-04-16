@@ -108,7 +108,15 @@ static int _modinit(void)
 
 static void _moddeinit(void)
 {
+	rb_dlink_node *n, *n2;
 	rb_event_delete(iterate_clients_ev);
+
+	RB_DLINK_FOREACH_SAFE(n, n2, safelisting_clients.head)
+	{
+		struct Client *source_p = n->data;
+		sendto_one_notice(source_p, ":/LIST aborted");
+		safelist_client_release(source_p);
+	}
 
 	delete_isupport("SAFELIST");
 	delete_isupport("ELIST");
@@ -423,7 +431,7 @@ static void
 reset_global_context(struct ResponseInfo *orig, uint64_t set_cap)
 {
 	outgoing_response_info = orig;
-	if (set_cap)
+	if (orig != NULL && set_cap)
 		SetClientCap(orig->source_p, set_cap);
 }
 
