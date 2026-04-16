@@ -25,6 +25,7 @@
 #include "client.h"
 #include "response.h"
 #include "send.h"
+#include "s_assert.h"
 #include "s_serv.h"
 
 /* number of seconds we'll wait for remote servers to finish sending their responses
@@ -53,7 +54,7 @@ cleanup_pending_responses(void *unused)
 	/* RB_DICTIONARY_FOREACH is not safe for deletion, so need to do this in two passes */
 	RB_DICTIONARY_FOREACH(response, &iter, pending_responses)
 	{
-		if (response->remote_response > 0 && response->expires < now)
+		if (response->expires < now)
 		{
 			rb_dlinkAddAlloc(response, &freelist);
 		}
@@ -62,7 +63,8 @@ cleanup_pending_responses(void *unused)
 	RB_DLINK_FOREACH_SAFE(ptr, nptr, freelist.head)
 	{
 		response = ptr->data;
-		sendto_one(response->source_p, ":%s BATCH -%s", me.name, response->batch);
+		if (response->remote_response > 0)
+			sendto_one(response->source_p, ":%s BATCH -%s", me.name, response->batch);
 		rb_dlinkDestroy(ptr, &freelist);
 		rb_dictionary_delete(pending_responses, response->batch);
 		free_response_batch(response);
@@ -92,32 +94,34 @@ begin_local_response_batch(void)
 }
 
 void
-begin_remote_response_batch(int server_count)
+begin_remote_response_batch(int server_count, const char *mask)
 {
 	if (outgoing_response_info == NULL || !MyConnect(outgoing_response_info->source_p))
 		return;
 
-	if (!EmptyString(outgoing_response_info->batch))
+	if (EmptyString(outgoing_response_info->batch))
 	{
-		/* increase the number of servers we're expecting responses from */
-		outgoing_response_info->remote_response += server_count;
-
-		/* if we're upgrading a local batch to a remote batch, add it to tracking places */
-		if (outgoing_response_info->expires == 0)
-		{
-			outgoing_response_info->expires = rb_current_time() + RESPONSE_EXPIRY;
-			rb_dlinkAddAlloc(outgoing_response_info, &outgoing_response_info->source_p->localClient->pending_remote_responses);
-			rb_dictionary_add(pending_responses, outgoing_response_info->batch, outgoing_response_info);
-		}
+		/* creating a new response batch */
+		generate_batch_id(outgoing_response_info->batch, sizeof(outgoing_response_info->batch));
+		outgoing_response_info->remote_response = server_count;
+		rb_strlcpy(outgoing_response_info->mask, mask, sizeof(outgoing_response_info->mask));
+		outgoing_response_info->expires = rb_current_time() + RESPONSE_EXPIRY;
+		rb_dlinkAddAlloc(outgoing_response_info, &outgoing_response_info->source_p->localClient->pending_remote_responses);
+		rb_dictionary_add(pending_responses, outgoing_response_info->batch, outgoing_response_info);
+		sendto_one(outgoing_response_info->source_p, ":%s BATCH +%s labeled-response",
+			me.name, outgoing_response_info->batch);
 	}
+	else
+	{
+		/* can only upgrade local batches to remote */
+		s_assert(outgoing_response_info->remote_response == 0);
 
-	generate_batch_id(outgoing_response_info->batch, sizeof(outgoing_response_info->batch));
-	outgoing_response_info->remote_response = server_count;
-	outgoing_response_info->expires = rb_current_time() + RESPONSE_EXPIRY;
-	rb_dlinkAddAlloc(outgoing_response_info, &outgoing_response_info->source_p->localClient->pending_remote_responses);
-	rb_dictionary_add(pending_responses, outgoing_response_info->batch, outgoing_response_info);
-	sendto_one(outgoing_response_info->source_p, ":%s BATCH +%s labeled-response",
-		me.name, outgoing_response_info->batch);
+		outgoing_response_info->remote_response += server_count;
+		rb_strlcpy(outgoing_response_info->mask, mask, sizeof(outgoing_response_info->mask));
+		outgoing_response_info->expires = rb_current_time() + RESPONSE_EXPIRY;
+		rb_dlinkAddAlloc(outgoing_response_info, &outgoing_response_info->source_p->localClient->pending_remote_responses);
+		rb_dictionary_add(pending_responses, outgoing_response_info->batch, outgoing_response_info);
+	}
 }
 
 struct ResponseInfo *
@@ -163,7 +167,7 @@ count_match_servs(struct Client *one, const char *mask, uint64_t cap, uint64_t n
 	RB_DLINK_FOREACH(ptr, global_serv_list.head)
 	{
 		struct Client *target_p = ptr->data;
-		if (target_p == &me)
+		if (IsMe(target_p))
 			continue;
 
 		if (target_p->from == one->from)

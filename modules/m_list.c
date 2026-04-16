@@ -310,7 +310,7 @@ mo_list(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source_
 	}
 
 	/* mark it as a "remote" response so we don't terminate the batch at the end of the command handler */
-	begin_remote_response_batch(1);
+	begin_remote_response_batch(1, "");
 	params->response_info = outgoing_response_info;
 
 	safelist_client_instantiate(source_p, params);
@@ -532,7 +532,29 @@ static void safelist_iterate_client(struct Client *source_p)
 	struct Channel *chptr;
 	rb_radixtree_iteration_state iter;
 	struct ResponseInfo *orig_outgoing_response_info = outgoing_response_info;
+	uint64_t CLICAP_LABELED_RESPONSE = capability_get(cli_capindex, "labeled-response", NULL);
+	uint64_t CLICAP_RECEIVE_LABEL = capability_get(cli_capindex, "?receive_label", NULL);
+	bool set_cap = false;
+	bool clear_cap = false;
+
+	if (outgoing_response_info != NULL
+		&& MyConnect(outgoing_response_info->source_p)
+		&& CLICAP_RECEIVE_LABEL
+		&& IsClientCapable(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL))
+	{
+		ClearClientCap(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL);
+		set_cap = true;
+	}
+
 	outgoing_response_info = source_p->localClient->safelist_data->response_info;
+	if (outgoing_response_info != NULL
+		&& MyConnect(outgoing_response_info->source_p)
+		&& IsClientCapable(outgoing_response_info->source_p, CLICAP_LABELED_RESPONSE | CLICAP_BATCH)
+		&& CLICAP_RECEIVE_LABEL)
+	{
+		SetClientCap(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL);
+		clear_cap = true;
+	}
 
 	RB_RADIXTREE_FOREACH_FROM(chptr, &iter, channel_tree, source_p->localClient->safelist_data->chname)
 	{
@@ -548,7 +570,13 @@ static void safelist_iterate_client(struct Client *source_p)
 		safelist_one_channel(source_p, chptr, source_p->localClient->safelist_data);
 	}
 
+	if (clear_cap)
+		ClearClientCap(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL);
+
 	outgoing_response_info = orig_outgoing_response_info;
+	if (set_cap)
+		SetClientCap(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL);
+
 	safelist_client_release(source_p);
 }
 
