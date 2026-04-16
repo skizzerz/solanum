@@ -399,6 +399,34 @@ static void safelist_client_instantiate(struct Client *client_p, struct ListClie
 	safelist_iterate_client(client_p);
 }
 
+/* Restore global contextual pointers for SAFELIST */
+static void
+restore_global_context(struct Client *client_p)
+{
+	uint64_t CLICAP_LABELED_RESPONSE = capability_get(cli_capindex, "labeled-response", NULL);
+	uint64_t CLICAP_RECEIVE_LABEL = capability_get(cli_capindex, "?receive_label", NULL);
+	if (outgoing_response_info != NULL && MyConnect(outgoing_response_info->source_p) && CLICAP_RECEIVE_LABEL)
+		ClearClientCap(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL);
+
+	outgoing_response_info = client_p->localClient->safelist_data->response_info;
+
+	if (outgoing_response_info != NULL
+		&& MyConnect(outgoing_response_info->source_p)
+		&& IsClientCapable(outgoing_response_info->source_p, CLICAP_LABELED_RESPONSE | CLICAP_BATCH)
+		&& CLICAP_RECEIVE_LABEL)
+	{
+		SetClientCap(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL);
+	}
+}
+
+static void
+reset_global_context(struct ResponseInfo *orig, uint64_t set_cap)
+{
+	outgoing_response_info = orig;
+	if (set_cap)
+		SetClientCap(orig->source_p, set_cap);
+}
+
 /*
  * safelist_client_release()
  *
@@ -409,10 +437,12 @@ static void safelist_client_instantiate(struct Client *client_p, struct ListClie
  */
 static void safelist_client_release(struct Client *client_p)
 {
-	if(!MyClient(client_p))
-		return;
+	uint64_t CLICAP_RECEIVE_LABEL = capability_get(cli_capindex, "?receive_label", NULL);
+	struct ResponseInfo *orig_outgoing_response_info = outgoing_response_info;
+	uint64_t set_cap = NOCAPS;
 
-	s_assert(MyClient(client_p));
+	if (!MyClient(client_p))
+		return;
 
 	rb_dlinkFindDestroy(client_p, &safelisting_clients);
 
@@ -421,8 +451,9 @@ static void safelist_client_release(struct Client *client_p)
 	rb_free(client_p->localClient->safelist_data->nomask);
 	rb_free(client_p->localClient->safelist_data);
 
-	struct ResponseInfo *orig_outgoing_response_info = outgoing_response_info;
-	outgoing_response_info = client_p->localClient->safelist_data->response_info;
+	if (outgoing_response_info != NULL && CLICAP_RECEIVE_LABEL)
+		set_cap = IsClientCapable(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL) ? CLICAP_RECEIVE_LABEL : NOCAPS;
+	restore_global_context(client_p);
 
 	client_p->localClient->safelist_data = NULL;
 
@@ -432,7 +463,7 @@ static void safelist_client_release(struct Client *client_p)
 		sendto_one(client_p, ":%s BATCH -%s", me.name, outgoing_response_info->batch);
 
 	free_response_batch(outgoing_response_info);
-	outgoing_response_info = orig_outgoing_response_info;
+	reset_global_context(orig_outgoing_response_info, set_cap);
 }
 
 /*
@@ -531,30 +562,13 @@ static void safelist_iterate_client(struct Client *source_p)
 {
 	struct Channel *chptr;
 	rb_radixtree_iteration_state iter;
-	struct ResponseInfo *orig_outgoing_response_info = outgoing_response_info;
-	uint64_t CLICAP_LABELED_RESPONSE = capability_get(cli_capindex, "labeled-response", NULL);
 	uint64_t CLICAP_RECEIVE_LABEL = capability_get(cli_capindex, "?receive_label", NULL);
-	bool set_cap = false;
-	bool clear_cap = false;
+	struct ResponseInfo *orig_outgoing_response_info = outgoing_response_info;
+	uint64_t set_cap = NOCAPS;
 
-	if (outgoing_response_info != NULL
-		&& MyConnect(outgoing_response_info->source_p)
-		&& CLICAP_RECEIVE_LABEL
-		&& IsClientCapable(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL))
-	{
-		ClearClientCap(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL);
-		set_cap = true;
-	}
-
-	outgoing_response_info = source_p->localClient->safelist_data->response_info;
-	if (outgoing_response_info != NULL
-		&& MyConnect(outgoing_response_info->source_p)
-		&& IsClientCapable(outgoing_response_info->source_p, CLICAP_LABELED_RESPONSE | CLICAP_BATCH)
-		&& CLICAP_RECEIVE_LABEL)
-	{
-		SetClientCap(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL);
-		clear_cap = true;
-	}
+	if (outgoing_response_info != NULL && CLICAP_RECEIVE_LABEL)
+		set_cap = IsClientCapable(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL) ? CLICAP_RECEIVE_LABEL : NOCAPS;
+	restore_global_context(source_p);
 
 	RB_RADIXTREE_FOREACH_FROM(chptr, &iter, channel_tree, source_p->localClient->safelist_data->chname)
 	{
@@ -570,13 +584,7 @@ static void safelist_iterate_client(struct Client *source_p)
 		safelist_one_channel(source_p, chptr, source_p->localClient->safelist_data);
 	}
 
-	if (clear_cap)
-		ClearClientCap(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL);
-
-	outgoing_response_info = orig_outgoing_response_info;
-	if (set_cap)
-		SetClientCap(outgoing_response_info->source_p, CLICAP_RECEIVE_LABEL);
-
+	reset_global_context(orig_outgoing_response_info, set_cap);
 	safelist_client_release(source_p);
 }
 
