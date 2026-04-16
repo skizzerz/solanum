@@ -150,6 +150,7 @@ static void safelist_check_cliexit(void *data)
 	{
 		struct ResponseInfo *orig_outgoing_response_info = outgoing_response_info;
 		uint64_t set_cap = restore_global_context(hdata->target);
+		sendto_one_notice(hdata->target, ":/LIST aborted");
 		safelist_client_release(hdata->target);
 		reset_global_context(orig_outgoing_response_info, set_cap);
 	}
