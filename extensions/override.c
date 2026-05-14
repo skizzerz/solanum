@@ -21,23 +21,26 @@
 #include "numeric.h"
 #include "privilege.h"
 #include "s_newconf.h"
+#include "metadata.h"
 
 static const char override_desc[] =
 	"Adds user mode +p, an operator-only user mode that grants temporary privileges to override anything";
 
-static void check_umode_change(void *data);
-static void hack_channel_access(void *data);
-static void hack_can_join(void *data);
-static void hack_can_kick(void *data);
-static void hack_can_send(void *data);
-static void hack_can_invite(void *data);
-static void handle_client_exit(void *data);
+static void check_umode_change(void *);
+static void hack_channel_access(void *);
+static void hack_can_join(void *);
+static void hack_can_kick(void *);
+static void hack_can_send(void *);
+static void hack_can_invite(void *);
+static void hack_can_metadata(void *);
+static void handle_client_exit(void *);
 
 mapi_hfn_list_av1 override_hfnlist[] = {
 	{ "umode_changed", check_umode_change },
 	{ "get_channel_access", hack_channel_access, HOOK_HIGHEST },
 	{ "can_join", hack_can_join, HOOK_HIGHEST },
 	{ "can_kick", hack_can_kick, HOOK_HIGHEST },
+	{ "can_metadata", hack_can_metadata, HOOK_HIGHEST },
 	{ "can_send", hack_can_send, HOOK_HIGHEST },
 	{ "can_invite", hack_can_invite, HOOK_HIGHEST },
 	{ "client_exit", handle_client_exit },
@@ -252,6 +255,30 @@ hack_can_invite(void *vdata)
 		update_session_deadline(data->client);
 		sendto_realops_snomask(SNO_GENERAL, L_NETWIDE, "%s is using oper-override on %s (invite: %s)",
 				       get_oper_name(data->client), data->chptr->chname, data->target->name);
+	}
+}
+
+static void
+hack_can_metadata(void *vdata)
+{
+	hook_data_int *data = vdata;
+	struct Client *source_p = data->client;
+	const struct MetadataEntry *entry = data->arg1;
+	int dir = data->arg2;
+
+	if (entry->type != METADATA_CHANNEL || data->result >= entry->write || entry->write > METADATA_ALLOW_OVERRIDE)
+		return;
+
+	if (source_p->umodes & user_modes['p'])
+	{
+		data->result = METADATA_ALLOW_OVERRIDE;
+		update_session_deadline(source_p);
+		if (dir == MODE_DEL && !strcmp(entry->key, "*"))
+			sendto_realops_snomask(SNO_GENERAL, L_NETWIDE, "%s is using oper-override on %s (clearing metadata)",
+				get_oper_name(source_p), entry->chptr->chname);
+		else
+			sendto_realops_snomask(SNO_GENERAL, L_NETWIDE, "%s is using oper-override on %s (%s metadata: %s)",
+				get_oper_name(source_p), entry->chptr->chname, dir == MODE_ADD ? "setting" : "deleting", entry->key);
 	}
 }
 

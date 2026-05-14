@@ -1431,7 +1431,7 @@ user_welcome(struct Client *source_p)
 	sendto_one_numeric(source_p, RPL_MYINFO, form_str(RPL_MYINFO), me.name, ircd_version, umodebuf, cflagsmyinfo);
 
 	show_isupport(source_p);
-
+	call_hook(h_user_welcome, source_p);
 	show_lusers(source_p);
 
 	if(ConfigFileEntry.short_motd)
@@ -1707,6 +1707,12 @@ change_nick_user_host(struct Client *target_p,	const char *nick, const char *use
 	{
 		monitor_signon(target_p);
 		del_all_accepts(target_p, false);
+
+		/* Update channel positions */
+		RB_DLINK_FOREACH(ptr, target_p->user->channel.head)
+		{
+			update_channel_member_pos(ptr->data);
+		}
 	}
 }
 

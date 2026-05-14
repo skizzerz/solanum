@@ -38,6 +38,7 @@ libircd_la_SOURCES =                  \
   listener.c                    \
   logger.c                      \
   match.c                       \
+  metadata.c                    \
   modules.c                     \
   monitor.c                     \
   msgbuf.c			\
