@@ -32,6 +32,7 @@ autoload_modules = [
   'm_list',
   'm_lusers',
   'm_map',
+  'm_metadata',
   'm_monitor',
   'm_motd',
   'm_names',
