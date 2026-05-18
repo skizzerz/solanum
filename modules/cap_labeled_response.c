@@ -195,6 +195,10 @@ cap_labeled_response_cleanup(void *unused)
 {
 	if (outgoing_response_info != NULL)
 	{
+		/* don't try to send anything if they disconnected */
+		if (IsIOError(outgoing_response_info->source_p))
+			return;
+
 		if (MyConnect(outgoing_response_info->source_p))
 		{
 			/* send an ACK if the handlers didn't send anything */
