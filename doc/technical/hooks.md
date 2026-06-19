@@ -36,6 +36,7 @@ module or define a new hook in a module, see `extensions/example_module.c`.
 | Core       | server_introduced              | A server has been introduced to the network (pre-burst)   |
 | Core       | server_eob                     | A server has finished processing a netjoin burst from us  |
 | Core       | umode_changed                  | The modes for a user have changed                         |
+| Core       | user_welcome                   | Called during the registration burst for a new local user |
 | m_info     | doing_info_conf                | Conf entries have been sent to an oper using INFO         |
 | m_invite   | can_invite                     | A local user is about to invite another user to a channel |
 | m_invite   | invite                         | A local user is about to be invited to a channel          |
@@ -43,6 +44,10 @@ module or define a new hook in a module, see `extensions/example_module.c`.
 | m_join     | channel_join                   | A user has finished joining a channel                     |
 | m_join     | channel_lowerts                | A remote server gave us a lower TS for a channel          |
 | m_kill     | can_kill                       | A local oper is about to kill a user                      |
+| m_metadata | can_metdata                    | Called when checking whether a user can access metadata   |
+| m_metadata | metadata_permissions           | Called when setting default permissions on new metadata   |
+| m_metadata | set_metadata                   | A local user is modifying or deleting a metadata entry    |
+| m_monitor  | new_monitor                    | A user has added a new entry to their MONITOR list        |
 | m_nick     | local_nick_change              | A local user has changed nicknames                        |
 | m_nick     | remote_nick_change             | A remote user has changed nicknames                       |
 | m_quit     | client_quit                    | A user has quit from the network                          |
@@ -413,6 +418,28 @@ sent to the client on a rejected attempt; it is up to the hook function to
 send any appropriate error message. Any nonzero value also indicates that the
 kill is allowed.
 
+### can_metadata
+
+This hook is called whenever the server needs to check if a client can read or
+write to a metadata entry. Hook functions can allow or reject the ability to
+read or write the entry by modifying the passed-in data.
+
+Hook data: `hook_data_int *`
+
+Fields:
+- client (`struct Client *`): The client attempting to access the metadata
+- arg1 (`const struct MetadataEntry *`): The metadata entry being accessed
+- arg2 (`int`): One of `MODE_QUERY` (for reading), `MODE_ADD` (for update), or
+  `MODE_DEL` (for deletion)
+- result (`int`): Output field indicating the client's level of access to this
+  metadata entry
+
+The `result` field should be set to one of the `enum metadata_perm` values.
+The default value will be set to the appropriate value based on internal
+permissions checks. The operation will be allowed if `result` is greater than
+or equal to `arg1->read` (for `arg2 == MODE_QUERY`) or `arg1->write` (for
+`arg2 == MODE_ADD` or `MODE_DEL`).
+
 ### can_send
 
 This hook is called whenever the server needs to check if a user can send a
@@ -493,25 +520,23 @@ channel is -k.
 
 ### channel_lowerts
 
-This hook is called after the server receives a join message for a remote user
-with a lower channel timestamp than what the server has for the channel. This
-hook is not called during netjoin bursts or when the remote side believes it
-has created a new channel; it is only called a join to an existing channel on
-the remote side.
+This hook is called after the server receives a `JOIN` or `SJOIN` message for
+a remote user with a lower channel timestamp than what the server has for the
+channel.
 
 Hook data: `hook_data_channel *`
 
 Fields:
 
-- client (`struct Client *`): The remote user joining the channel
+- client (`struct Client *`): For `JOIN`, the remote user joining the channel;
+  for `SJOIN`, the server issuing the `SJOIN` message
 - chptr (`struct Channel *`): The channel being joined
 - approved (`int`): Unused (always 0)
 
-At the time the hook is called, client has not yet been added to chptr as a
-member, but we have cleared all modes from the local channel. Because this
-hook is only called when we receive a JOIN from a remote server and not an
-SJOIN, it is not a reliable method of knowing that a local channel has had its
-timestamp lowered.
+At the time the hook is called, `client` has not yet been added to chptr as a
+member (for `JOIN`) or the clients specified in the user list have not yet
+been joined to the channel (for `SJOIN`), but we have cleared all modes from
+the local channel.
 
 ### client_exit
 
@@ -780,15 +805,17 @@ target of the WHOIS will always be a local client. The hook is called after
 all regular WHOIS lines have been sent to the user, but before the
 `RPL_ENDOFWHOIS` numeric is sent to the user.
 
-Hook data: `hook_data_client *`
+Hook data: `hook_data_client_approval *`
 
 Fields:
 
 - client (`struct Client *`): The user executing WHOIS
 - target (`struct Client *`): The target of the WHOIS command
+- approved (`int`): Set to 1 if this is an operspy WHOIS, 0 otherwise
 
 Hook functions can use this hook to send additional lines to the client as a
-part of the WHOIS response.
+part of the WHOIS response. The approved field is not an output field; it is
+an indicator as to whether or not an operspy was performed.
 
 ### doing_whois_channel_visibility
 
@@ -822,15 +849,17 @@ target of the WHOIS in such a case will always be a local client. The hook is
 called after all regular WHOIS lines have been sent to the user, but before
 the `RPL_ENDOFWHOIS` numeric is sent to the user.
 
-Hook data: `hook_data_client *`
+Hook data: `hook_data_client_approval *`
 
 Fields:
 
 - client (`struct Client *`): The user executing WHOIS
 - target (`struct Client *`): The target of the WHOIS command
+- approved (`int`): Set to 1 if this is an operspy WHOIS, 0 otherwise
 
 Hook functions can use this hook to send additional lines to the client as a
-part of the WHOIS response.
+part of the WHOIS response. The approved field is not an output field; it is
+an indicator as to whether or not an operspy was performed.
 
 ### doing_whois_show_idle
 
@@ -1058,6 +1087,25 @@ adjust the tag's key and value passed to the message handler. The pointed-to
 buffers are not copied and must persist for the lifetime of the message
 handler. Setting `value` to `NULL` will strip the value from the tag.
 
+### metadata_permissions
+
+This hook is called whenever a new metadata entry is created, including those
+received by remote servers.
+
+Hook data: `hook_data *`
+
+Fields:
+- client (`struct Client *`): The user or server creating the entry
+- arg1 (`struct MetadataEntry *`): The created entry
+- arg2 (`void *`): Unused (always `NULL`)
+
+Hook functions that wish to alter the default permissions of the entry should
+modify `arg1->read` and `arg1->write` to adjust permissions. By default, these
+permissions follow the rules specified in `docs/features/metadata.md`. Hook
+functions may also manipulate `arg1->flags` to set additional flags on the
+entry. After the hook is executed, `METADATA_FLAG_EXCLUDE` will be unset if
+the write permission allows non-oper users write access to the entry.
+
 ### new_local_user
 
 This hook is called after a local user has completed connection registration,
@@ -1069,6 +1117,24 @@ Hook data: `struct Client *`
 
 The hook data is the user being introduced. Hook functions can safely kill
 this client should the connection attempt not be allowed to proceed.
+
+### new_monitor
+
+This hook is called after a local user has added a new nickname to their
+MONITOR list.
+
+Hook data: `hook_data *`
+
+Fields:
+
+- client (`struct Client *`): The client adding the monitor entry
+- arg1 (`struct monitor *`): The monitor entry that was added
+- arg2 (`struct Client *`): The client corresponding to the new entry, or
+  `NULL` if no client matching the nickname is online
+
+The `client` has already been added to the `arg1->users` list at the time this
+hook is called. However, no `RPL_MONONLINE` messages have been sent to the
+client yet for the added nickname.
 
 ### new_remote_user
 
@@ -1275,6 +1341,28 @@ The hook data is the server that has indicated it has finished processing any
 netjoin burst data sent by us. The EOB flag has already been set on source_p
 by the time this hook is called.
 
+### set_metadata
+
+This hook is called whenever a local user is attempting to modify a metadata
+entry. Hook functions can reject the modification or alter the value being set
+by modifying the passed-in data.
+
+Hook data: `hook_data_metadata_approval *`
+
+Fields:
+- source (`struct Client *`): The local user modifying the metadata
+- metadata (`struct MetadataEntry *`): The metadata entry being modified
+- value (`const char *`): The value being set (empty string if the entry is
+  being deleted)
+- dir (`int`): `MODE_ADD` if the entry is being updated or `MODE_DEL` if the
+  entry is being deleted
+- approved (`int`): Output field indicating whether the operation is allowed
+
+Hook functions may set `value` to a different pointer to adjust the value
+being set. If `approved` is 0 (default), the operation is allowed. Any nonzero
+value for `approved` will cause the operation to be rejected and the source to
+be notified that the value was rejected.
+
 ### umode_changed
 
 This hook is called after a user is introduced and after any changes to their
@@ -1291,3 +1379,14 @@ Fields:
 
 Because any mode changes have already been applied, hook functions can check
 the current user modes or snomask for the user to determine what has changed.
+
+### user_welcome
+
+This hook is called while the registration burst for a new local user is being
+sent. It happens after sending ISUPPORT but before sending LUSERS. Some IRCv3
+specifications require sending additional registration data during precisely
+this timing.
+
+Hook data: `struct Client *`
+
+The hook data is the client that is being introduced to the network.

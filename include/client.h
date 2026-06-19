@@ -61,6 +61,7 @@ struct Server;
 struct LocalUser;
 struct PreClient;
 struct ListClient;
+struct MetadataClient;
 struct scache_entry;
 
 typedef int SSL_OPEN_CB(struct Client *, int status);
@@ -151,6 +152,8 @@ struct Client
 
 	time_t large_ctcp_sent; /* ctcp to large group sent, relax flood checks */
 	char *certfp; /* client certificate fingerprint */
+
+	rb_dlink_list metadata;
 };
 
 struct LocalUser
@@ -258,6 +261,7 @@ struct LocalUser
 	unsigned int join_who_credits;
 
 	struct ListClient *safelist_data;
+	struct MetadataClient *metadata_data;
 
 	char *mangledhost; /* non-NULL if host mangling module loaded and
 			      applicable to this client */
@@ -310,6 +314,7 @@ struct PreClient
 };
 
 struct ResponseInfo;
+struct MetadataEntry;
 
 struct ListClient
 {
@@ -324,6 +329,22 @@ struct ListClient
 	time_t topic_max;
 	int operspy;
 	struct ResponseInfo *response_info;
+};
+
+struct MetadataClient
+{
+	const char *cmd;
+	char *target;
+	char *batch;
+	char *resume_target;
+	char *resume_subtarget;
+	char *resume_key;
+	uint32_t flags;
+	/* next_* will always be NULL when not actively iterating this client */
+	const char *next_target;
+	const char *next_subtarget;
+	rb_dlink_node *next_node1;
+	rb_dlink_node *next_node2;
 };
 
 /*

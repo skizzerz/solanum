@@ -46,6 +46,7 @@
 #include "hostmask.h"
 #include "listener.h"
 #include "hook.h"
+#include "metadata.h"
 #include "msg.h"
 #include "monitor.h"
 #include "reject.h"
@@ -319,6 +320,7 @@ free_client(struct Client *client_p)
 	free_local_client(client_p);
 	free_pre_client(client_p);
 	rb_free(client_p->certfp);
+	free_client_metadata(client_p);
 	rb_bh_free(client_heap, client_p);
 }
 
@@ -826,12 +828,11 @@ resv_nick_fnc(const char *mask, const char *reason, int temp_time)
 			add_to_client_hash(nick, client_p);
 
 			monitor_signon(client_p);
+			del_all_accepts(client_p, false);
 
-			RB_DLINK_FOREACH_SAFE(ptr, next_ptr, client_p->on_allow_list.head)
+			RB_DLINK_FOREACH(ptr, client_p->user->channel.head)
 			{
-				target_p = ptr->data;
-				rb_dlinkFindDestroy(client_p, &target_p->localClient->allow_list);
-				rb_dlinkDestroy(ptr, &client_p->on_allow_list);
+				update_channel_member_pos(ptr->data);
 			}
 
 			snprintf(note, sizeof(note), "Nick: %s", nick);

@@ -31,7 +31,7 @@
 #define MAXMODEPARAMS   4
 #define MAXMODEPARAMSSERV 10
 
-#include <setup.h>
+#include "rb_dictionary.h"
 #include "hook.h"
 
 struct Client;
@@ -82,6 +82,8 @@ struct Channel
 	time_t last_checked_ts;
 	unsigned int last_checked_type;
 	int last_checked_result;
+
+	rb_dlink_list metadata;
 };
 
 struct membership
@@ -95,6 +97,7 @@ struct membership
 	unsigned int flags;
 
 	time_t bants;
+	rb_dlink_list metadata;
 };
 
 #define BANLEN 195
@@ -266,6 +269,7 @@ extern void add_user_to_channel(struct Channel *, struct Client *, int flags);
 extern void remove_user_from_channel(struct membership *);
 extern void remove_user_from_channels(struct Client *);
 extern void invalidate_bancache_user(struct Client *);
+extern void update_channel_member_pos(struct membership *msptr);
 
 extern void free_channel_list(rb_dlink_list *);
 
