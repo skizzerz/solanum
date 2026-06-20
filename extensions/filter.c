@@ -44,6 +44,7 @@
 #include "msgbuf.h"
 #include "newconf.h"
 #include "logger.h"
+#include "metadata.h"
 
 #include <hs_common.h>
 #include <hs_runtime.h>
@@ -54,16 +55,17 @@ static const char filter_desc[] = "Filter messages using a precompiled Hyperscan
 
 static int modinit(void);
 static void moddeinit(void);
-static void filter_msg_user(void *data);
-static void filter_msg_channel(void *data);
-static void filter_client_quit(void *data);
-static void on_client_exit(void *data);
-static void filter_init_conf(void *data);
-static void filter_conf_info(void *data);
-static void filter_version_info(void *data);
-static void filter_conf_set_sees_user_info(void *data);
-static void filter_conf_set_bypass_all(void *data);
-static void filter_conf_set_exit_message(void *data);
+static void filter_msg_user(void *);
+static void filter_msg_channel(void *);
+static void filter_metadata(void *);
+static void filter_client_quit(void *);
+static void on_client_exit(void *);
+static void filter_init_conf(void *);
+static void filter_conf_info(void *);
+static void filter_version_info(void *);
+static void filter_conf_set_sees_user_info(void *);
+static void filter_conf_set_bypass_all(void *);
+static void filter_conf_set_exit_message(void *);
 
 static void mo_setfilter(struct MsgBuf *, struct Client *, struct Client *, int, const char **);
 static void me_setfilter(struct MsgBuf *, struct Client *, struct Client *, int, const char **);
@@ -114,6 +116,7 @@ mapi_hfn_list_av1 filter_hfnlist[] = {
 	{ "conf_read_start", filter_init_conf },
 	{ "doing_info_conf", filter_conf_info },
 	{ "doing_version_confopts", filter_version_info },
+	{ "set_metadata", filter_metadata },
 	{ NULL, NULL }
 };
 
@@ -572,6 +575,55 @@ filter_client_quit(void *data_)
 			s->name, s->username, s->host, s->sockhost);
 	}
 	/* No point in doing anything with ACT_KILL */
+}
+
+void
+filter_metadata(void *data_)
+{
+	hook_data_metadata_approval *data = data_;
+	struct Client *s = data->source;
+	char target[BUFSIZE];
+	if (IsOper(s) || data->dir == MODE_DEL)
+		return;
+
+	char *text = strcpy(clean_buffer, data->value);
+	strip_colour(text);
+	strip_unprintable(text);
+
+	switch (data->metadata->type)
+	{
+	case METADATA_CHANNEL:
+		snprintf(target, sizeof(target), "C %s * %s",
+			data->metadata->chptr->chname, data->metadata->key);
+		break;
+	case METADATA_MEMBER:
+		snprintf(target, sizeof(target), "M %s %s %s",
+			data->metadata->msptr->chptr->chname, data->metadata->msptr->client_p->name, data->metadata->key);
+		break;
+	case METADATA_USER:
+		snprintf(target, sizeof(target), "U %s * %s",
+			data->metadata->target_p->name, data->metadata->key);
+		break;
+	default:
+		snprintf(target, sizeof(target), "? ? ? %s", data->metadata->key);
+		break;
+	}
+
+	unsigned r = match_message("0", s, false, "METADATA", target, data->value) |
+				 match_message("1", s, false, "METADATA", target, text);
+
+	if (r & ACT_DROP) {
+		data->approved = 1;
+	}
+	if (r & ACT_ALARM) {
+		sendto_realops_snomask(SNO_GENERAL, L_ALL | L_NETWIDE,
+			"FILTER: %s!%s@%s [%s]",
+			s->name, s->username, s->host, s->sockhost);
+	}
+	if (r & ACT_KILL) {
+		data->approved = 1;
+		exit_client(NULL, s, s, filter_exit_message != NULL ? filter_exit_message : FILTER_DEFAULT_EXIT_MSG);
+	}
 }
 
 void
