@@ -44,6 +44,9 @@ module or define a new hook in a module, see `extensions/example_module.c`.
 | m_join     | channel_join                   | A user has finished joining a channel                     |
 | m_join     | channel_lowerts                | A remote server gave us a lower TS for a channel          |
 | m_kill     | can_kill                       | A local oper is about to kill a user                      |
+| m_metadata | can_metdata                    | Called when checking whether a user can access metadata   |
+| m_metadata | metadata_permissions           | Called when setting default permissions on new metadata   |
+| m_metadata | set_metadata                   | A local user is modifying or deleting a metadata entry    |
 | m_monitor  | new_monitor                    | A user has added a new entry to their MONITOR list        |
 | m_nick     | local_nick_change              | A local user has changed nicknames                        |
 | m_nick     | remote_nick_change             | A remote user has changed nicknames                       |
@@ -414,6 +417,28 @@ allowed. Setting `approved` to 0 rejects the kill attempt. No error message is
 sent to the client on a rejected attempt; it is up to the hook function to
 send any appropriate error message. Any nonzero value also indicates that the
 kill is allowed.
+
+### can_metadata
+
+This hook is called whenever the server needs to check if a client can read or
+write to a metadata entry. Hook functions can allow or reject the ability to
+read or write the entry by modifying the passed-in data.
+
+Hook data: `hook_data_int *`
+
+Fields:
+- client (`struct Client *`): The client attempting to access the metadata
+- arg1 (`const struct MetadataEntry *`): The metadata entry being accessed
+- arg2 (`int`): One of `MODE_QUERY` (for reading), `MODE_ADD` (for update), or
+  `MODE_DEL` (for deletion)
+- result (`int`): Output field indicating the client's level of access to this
+  metadata entry
+
+The `result` field should be set to one of the `enum metadata_perm` values.
+The default value will be set to the appropriate value based on internal
+permissions checks. The operation will be allowed if `result` is greater than
+or equal to `arg1->read` (for `arg2 == MODE_QUERY`) or `arg1->write` (for
+`arg2 == MODE_ADD` or `MODE_DEL`).
 
 ### can_send
 
@@ -1062,6 +1087,25 @@ adjust the tag's key and value passed to the message handler. The pointed-to
 buffers are not copied and must persist for the lifetime of the message
 handler. Setting `value` to `NULL` will strip the value from the tag.
 
+### metadata_permissions
+
+This hook is called whenever a new metadata entry is created, including those
+received by remote servers.
+
+Hook data: `hook_data *`
+
+Fields:
+- client (`struct Client *`): The user or server creating the entry
+- arg1 (`struct MetadataEntry *`): The created entry
+- arg2 (`void *`): Unused (always `NULL`)
+
+Hook functions that wish to alter the default permissions of the entry should
+modify `arg1->read` and `arg1->write` to adjust permissions. By default, these
+permissions follow the rules specified in `docs/features/metadata.md`. Hook
+functions may also manipulate `arg1->flags` to set additional flags on the
+entry. After the hook is executed, `METADATA_FLAG_EXCLUDE` will be unset if
+the write permission allows non-oper users write access to the entry.
+
 ### new_local_user
 
 This hook is called after a local user has completed connection registration,
@@ -1296,6 +1340,28 @@ Hook data: `struct Client *`
 The hook data is the server that has indicated it has finished processing any
 netjoin burst data sent by us. The EOB flag has already been set on source_p
 by the time this hook is called.
+
+### set_metadata
+
+This hook is called whenever a local user is attempting to modify a metadata
+entry. Hook functions can reject the modification or alter the value being set
+by modifying the passed-in data.
+
+Hook data: `hook_data_metadata_approval *`
+
+Fields:
+- source (`struct Client *`): The local user modifying the metadata
+- metadata (`struct MetadataEntry *`): The metadata entry being modified
+- value (`const char *`): The value being set (empty string if the entry is
+  being deleted)
+- dir (`int`): `MODE_ADD` if the entry is being updated or `MODE_DEL` if the
+  entry is being deleted
+- approved (`int`): Output field indicating whether the operation is allowed
+
+Hook functions may set `value` to a different pointer to adjust the value
+being set. If `approved` is 0 (default), the operation is allowed. Any nonzero
+value for `approved` will cause the operation to be rejected and the source to
+be notified that the value was rejected.
 
 ### umode_changed
 

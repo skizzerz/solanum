@@ -10,6 +10,7 @@ LETTER (* = Oper only.)
 X A - Shows DNS servers
 X b - Shows active nick delays
 X B - Shows hash statistics
+* C - Shows capabilities
 ^ c - Shows connect blocks (Old C:/N: lines)
 * d - Shows temporary D lines
 * D - Shows D lines
@@ -22,6 +23,7 @@ X f - Shows File Descriptors
 ^ k - Shows temporary K lines (or matched klines)
 ^ L - Shows IP and generic info about [nick]
 ^ l - Shows hostname and generic info about [nick]
+* M - Shows metadata statistics
   m - Shows commands and their usage
   n - Shows DNS blacklists
 * O - Shows privset blocks
@@ -35,6 +37,7 @@ X f - Shows File Descriptors
 X S - Shows ssld processes
 * t - Shows generic server stats
   u - Shows server uptime
+* U - Shows service blocks (Old U: lines)
 ^ v - Shows connected servers and brief status information
 * x - Shows temporary and global gecos bans
 * X - Shows gecos bans (Old X: lines)
