@@ -245,4 +245,13 @@ typedef struct
 	bool signal;
 } hook_data_rehash;
 
+typedef struct
+{
+	struct Client *source;
+	struct MetadataEntry *metadata;
+	const char *value;
+	int dir;
+	int approved;
+} hook_data_metadata_approval;
+
 #endif

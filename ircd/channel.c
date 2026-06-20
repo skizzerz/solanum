@@ -38,6 +38,7 @@
 #include "s_conf.h"		/* ConfigFileEntry, ConfigChannel */
 #include "s_newconf.h"
 #include "logger.h"
+#include "metadata.h"
 #include "s_assert.h"
 
 struct config_channel_entry ConfigChannel;
@@ -93,6 +94,7 @@ free_channel(struct Channel *chptr)
 	rb_free(chptr->chname);
 	rb_free(chptr->mode_lock);
 	rb_radixtree_destroy(chptr->members, NULL, NULL);
+	free_channel_metadata(chptr);
 	rb_bh_free(channel_heap, chptr);
 }
 
@@ -274,6 +276,7 @@ remove_user_from_channel(struct membership *msptr)
 	if(!(chptr->mode.mode & MODE_PERMANENT) && rb_radixtree_size(chptr->members) == 0)
 		destroy_channel(chptr);
 
+	free_member_metadata(msptr);
 	rb_bh_free(member_heap, msptr);
 }
 
@@ -307,6 +310,7 @@ remove_user_from_channels(struct Client *client_p)
 		if(!(chptr->mode.mode & MODE_PERMANENT) && rb_radixtree_size(chptr->members) == 0)
 			destroy_channel(chptr);
 
+		free_member_metadata(msptr);
 		rb_bh_free(member_heap, msptr);
 	}
 

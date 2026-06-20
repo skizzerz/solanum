@@ -83,6 +83,8 @@ struct Channel
 	time_t last_checked_ts;
 	unsigned int last_checked_type;
 	int last_checked_result;
+
+	rb_dlink_list metadata;
 };
 
 struct membership
@@ -96,6 +98,7 @@ struct membership
 	unsigned int flags;
 
 	time_t bants;
+	rb_dlink_list metadata;
 };
 
 #define BANLEN 195
