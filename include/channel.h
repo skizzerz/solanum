@@ -31,7 +31,7 @@
 #define MAXMODEPARAMS   4
 #define MAXMODEPARAMSSERV 10
 
-#include <setup.h>
+#include "stdinc.h"
 #include "hook.h"
 
 struct Client;
