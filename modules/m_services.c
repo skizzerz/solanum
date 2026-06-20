@@ -194,6 +194,7 @@ me_rsfnc(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source
 	time_t newts, curts;
 	struct nd_entry *nd;
 	char note[NAMELEN + 10];
+	rb_dlink_node *ptr;
 
 	if(!(source_p->flags & FLAGS_SERVICE))
 	{

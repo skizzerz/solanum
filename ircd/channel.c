@@ -81,14 +81,18 @@ allocate_channel(const char *chname)
 	struct Channel *chptr;
 	chptr = rb_bh_alloc(channel_heap);
 	chptr->chname = rb_strdup(chname);
+	chptr->members = rb_radixtree_create(NULL, NULL);
 	return (chptr);
 }
 
 void
 free_channel(struct Channel *chptr)
 {
+	s_assert(rb_radixtree_size(chptr->members) == 0);
+
 	rb_free(chptr->chname);
 	rb_free(chptr->mode_lock);
+	rb_radixtree_destroy(chptr->members, NULL, NULL);
 	rb_bh_free(channel_heap, chptr);
 }
 
@@ -168,37 +172,10 @@ send_batched_channel_join(struct Channel *chptr, struct Client *client_p, const 
 struct membership *
 find_channel_membership(struct Channel *chptr, struct Client *client_p)
 {
-	struct membership *msptr;
-	rb_dlink_node *ptr;
-
 	if(!IsClient(client_p))
 		return NULL;
 
-	/* Pick the most efficient list to use to be nice to things like
-	 * CHANSERV which could be in a large number of channels
-	 */
-	if(rb_dlink_list_length(&chptr->members) < rb_dlink_list_length(&client_p->user->channel))
-	{
-		RB_DLINK_FOREACH(ptr, chptr->members.head)
-		{
-			msptr = ptr->data;
-
-			if(msptr->client_p == client_p)
-				return msptr;
-		}
-	}
-	else
-	{
-		RB_DLINK_FOREACH(ptr, client_p->user->channel.head)
-		{
-			msptr = ptr->data;
-
-			if(msptr->chptr == chptr)
-				return msptr;
-		}
-	}
-
-	return NULL;
+	return rb_radixtree_retrieve(chptr->members, use_id(client_p));
 }
 
 /* find_channel_status()
@@ -262,7 +239,9 @@ add_user_to_channel(struct Channel *chptr, struct Client *client_p, int flags)
 	else
 		rb_dlinkAddBefore(p, msptr, &msptr->usernode, &client_p->user->channel);
 
-	rb_dlinkAdd(msptr, &msptr->channode, &chptr->members);
+	msptr->channode = rb_radixtree_elem_add(chptr->members, use_id(client_p), msptr);
+	/* if the client is already in the member tree, this will be NULL (meaning we tried to add them twice) */
+	s_assert(msptr->channode != NULL);
 
 	if(MyClient(client_p))
 		rb_dlinkAdd(msptr, &msptr->locchannode, &chptr->locmembers);
@@ -287,17 +266,15 @@ remove_user_from_channel(struct membership *msptr)
 	chptr = msptr->chptr;
 
 	rb_dlinkDelete(&msptr->usernode, &client_p->user->channel);
-	rb_dlinkDelete(&msptr->channode, &chptr->members);
+	rb_radixtree_elem_delete(chptr->members, msptr->channode);
 
 	if(client_p->servptr == &me)
 		rb_dlinkDelete(&msptr->locchannode, &chptr->locmembers);
 
-	if(!(chptr->mode.mode & MODE_PERMANENT) && rb_dlink_list_length(&chptr->members) <= 0)
+	if(!(chptr->mode.mode & MODE_PERMANENT) && rb_radixtree_size(chptr->members) == 0)
 		destroy_channel(chptr);
 
 	rb_bh_free(member_heap, msptr);
-
-	return;
 }
 
 /* remove_user_from_channels()
@@ -322,12 +299,12 @@ remove_user_from_channels(struct Client *client_p)
 		msptr = ptr->data;
 		chptr = msptr->chptr;
 
-		rb_dlinkDelete(&msptr->channode, &chptr->members);
+		rb_radixtree_elem_delete(chptr->members, msptr->channode);
 
 		if(client_p->servptr == &me)
 			rb_dlinkDelete(&msptr->locchannode, &chptr->locmembers);
 
-		if(!(chptr->mode.mode & MODE_PERMANENT) && rb_dlink_list_length(&chptr->members) <= 0)
+		if(!(chptr->mode.mode & MODE_PERMANENT) && rb_radixtree_size(chptr->members) == 0)
 			destroy_channel(chptr);
 
 		rb_bh_free(member_heap, msptr);
@@ -504,7 +481,7 @@ channel_member_names(struct Channel *chptr, struct Client *client_p, int show_eo
 {
 	struct membership *msptr;
 	struct Client *target_p;
-	rb_dlink_node *ptr;
+	rb_radixtree_iteration_state state;
 	int is_member;
 	int stack = IsClientCapable(client_p, CLICAP_MULTI_PREFIX);
 
@@ -518,9 +495,8 @@ channel_member_names(struct Channel *chptr, struct Client *client_p, int show_eo
 				channel_pub_or_secret(chptr),
 				chptr->chname);
 
-		RB_DLINK_FOREACH(ptr, chptr->members.head)
+		RB_RADIXTREE_FOREACH(msptr, &state, chptr->members)
 		{
-			msptr = ptr->data;
 			target_p = msptr->client_p;
 
 			if(IsInvisible(target_p) && !is_member)
@@ -767,8 +743,7 @@ can_join(struct Client *source_p, struct Channel *chptr, const char *key, const 
 		}
 	}
 
-	if(chptr->mode.limit &&
-	   rb_dlink_list_length(&chptr->members) >= (unsigned long) chptr->mode.limit)
+	if(chptr->mode.limit && rb_radixtree_size(chptr->members) >= (size_t)chptr->mode.limit)
 		i = ERR_CHANNELISFULL;
 	if(chptr->mode.mode & MODE_REGONLY && EmptyString(source_p->user->suser))
 		i = ERR_NEEDREGGEDNICK;

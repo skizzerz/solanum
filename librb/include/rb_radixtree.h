@@ -150,7 +150,7 @@ const char *rb_radixtree_elem_get_key(rb_radixtree_leaf *elem);
 void rb_radixtree_elem_set_data(rb_radixtree_leaf *elem, void *data);
 void *rb_radixtree_elem_get_data(rb_radixtree_leaf *elem);
 
-unsigned int rb_radixtree_size(rb_radixtree *dict);
+size_t rb_radixtree_size(rb_radixtree *dict);
 void rb_radixtree_stats(rb_radixtree *dict, void (*cb)(const char *line, void *privdata), void *privdata);
 void rb_radixtree_stats_walk(void (*cb)(const char *line, void *privdata), void *privdata);
 

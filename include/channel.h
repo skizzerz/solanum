@@ -33,6 +33,7 @@
 
 #include <setup.h>
 #include "hook.h"
+#include "rb_radixtree.h"
 
 struct Client;
 
@@ -58,7 +59,7 @@ struct Channel
 	time_t topic_time;
 	time_t last_knock;	/* don't allow knock to flood */
 
-	rb_dlink_list members;	/* channel members */
+	rb_radixtree *members;	/* channel members */
 	rb_dlink_list locmembers;	/* local channel members */
 
 	rb_dlink_list invites;
@@ -86,7 +87,7 @@ struct Channel
 
 struct membership
 {
-	rb_dlink_node channode;
+	rb_radixtree_leaf *channode;
 	rb_dlink_node locchannode;
 	rb_dlink_node usernode;
 

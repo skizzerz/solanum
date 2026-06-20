@@ -826,13 +826,7 @@ resv_nick_fnc(const char *mask, const char *reason, int temp_time)
 			add_to_client_hash(nick, client_p);
 
 			monitor_signon(client_p);
-
-			RB_DLINK_FOREACH_SAFE(ptr, next_ptr, client_p->on_allow_list.head)
-			{
-				target_p = ptr->data;
-				rb_dlinkFindDestroy(client_p, &target_p->localClient->allow_list);
-				rb_dlinkDestroy(ptr, &client_p->on_allow_list);
-			}
+			del_all_accepts(client_p, false);
 
 			snprintf(note, sizeof(note), "Nick: %s", nick);
 			rb_note(client_p->localClient->F, note);

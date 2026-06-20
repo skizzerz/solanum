@@ -201,7 +201,7 @@ m_who(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source_p,
 
 		if(chptr != NULL)
 		{
-			if (!IsOperGeneral(source_p) && !ratelimit_client_who(source_p, rb_dlink_list_length(&chptr->members)/50))
+			if (!IsOperGeneral(source_p) && !ratelimit_client_who(source_p, rb_radixtree_size(chptr->members)/50))
 			{
 				sendto_one(source_p, form_str(RPL_LOAD2HI),
 						me.name, source_p->name, "WHO");
@@ -313,11 +313,10 @@ who_common_channel(struct Client *source_p, struct Channel *chptr,
 {
 	struct membership *msptr;
 	struct Client *target_p;
-	rb_dlink_node *ptr;
+	rb_radixtree_iteration_state state;
 
-	RB_DLINK_FOREACH(ptr, chptr->members.head)
+	RB_RADIXTREE_FOREACH(msptr, &state, chptr->members)
 	{
-		msptr = ptr->data;
 		target_p = msptr->client_p;
 
 		if(!IsInvisible(target_p) || IsMarked(target_p))
@@ -441,11 +440,10 @@ do_who_on_channel(struct Client *source_p, struct Channel *chptr,
 {
 	struct Client *target_p;
 	struct membership *msptr;
-	rb_dlink_node *ptr;
+	rb_radixtree_iteration_state state;
 
-	RB_DLINK_FOREACH(ptr, chptr->members.head)
+	RB_RADIXTREE_FOREACH(msptr, &state, chptr->members)
 	{
-		msptr = ptr->data;
 		target_p = msptr->client_p;
 
 		if(server_oper && !SeesOper(target_p, source_p))

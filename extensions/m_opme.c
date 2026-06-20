@@ -56,7 +56,7 @@ mo_opme(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source_
 {
 	struct Channel *chptr;
 	struct membership *msptr;
-	rb_dlink_node *ptr;
+	rb_radixtree_iteration_state state;
 
 	/* admins only */
 	if(!IsOperAdmin(source_p))
@@ -72,10 +72,8 @@ mo_opme(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source_
 		return;
 	}
 
-	RB_DLINK_FOREACH(ptr, chptr->members.head)
+	RB_RADIXTREE_FOREACH(msptr, &state, chptr->members)
 	{
-		msptr = ptr->data;
-
 		if(is_chanop(msptr))
 		{
 			sendto_one_notice(source_p, ":%s Channel is not opless", parv[1]);
