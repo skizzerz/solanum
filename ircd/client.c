@@ -46,6 +46,7 @@
 #include "hostmask.h"
 #include "listener.h"
 #include "hook.h"
+#include "metadata.h"
 #include "msg.h"
 #include "monitor.h"
 #include "reject.h"
@@ -319,6 +320,7 @@ free_client(struct Client *client_p)
 	free_local_client(client_p);
 	free_pre_client(client_p);
 	rb_free(client_p->certfp);
+	free_client_metadata(client_p);
 	rb_bh_free(client_heap, client_p);
 }
 

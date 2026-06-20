@@ -38,6 +38,7 @@ auto_load_mod_LTLIBRARIES = \
   m_list.la \
   m_lusers.la \
   m_map.la \
+  m_metadata.la \
   m_monitor.la \
   m_motd.la \
   m_names.la \
