@@ -30,6 +30,7 @@ test_runtime = custom_target('test_runtime',
 test_programs = {
   'chmode1': 'chmode1.c',
   'match1': 'match1.c',
+  'metadata1': 'metadata1.c',
   'misc': 'misc.c',
   'msgbuf_parse1': 'msgbuf_parse1.c',
   'msgbuf_unparse1': 'msgbuf_unparse1.c',
