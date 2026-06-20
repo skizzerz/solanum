@@ -22,6 +22,7 @@
 #ifndef INCLUDED_batch_h
 #define INCLUDED_batch_h
 
+#include "stdinc.h"
 #include "msgbuf.h"
 
 #define BATCH_EXPIRY (15)
