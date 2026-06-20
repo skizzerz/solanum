@@ -251,12 +251,15 @@ commands. After receiving `SERVER`, you should then send the following:
       enabled in ircd.conf
     - `OPER` if the client is an oper
     - `ENCAP * IDENTIFIED` if the client is logged into a services account
+    - `ENCAP * MDS` and `ENCAP * MDI` for all of that client's user metadata
 5. For each of your channels:
     - `SJOIN` (repeated until all channel members are sent)
     - `EBMASK` for all list modes (+beIq) if the server supports **EBMASK**,
       `BMASK` otherwise (repeated until all mode lists are sent)
     - `TB` if a topic is set and the remote supports **TB**
     - `MLOCK` if the remote supports **MLOCK**
+    - `ENCAP * MDS` and `ENCAP * MDI` for all of that channel's channel and
+      member metadata
 6. `PING :<remote>` where the remote parameter is the SID of the server being
    linked to
 
@@ -420,6 +423,10 @@ detail in subsections in alphabetical order. Commands which are sent over
 | Messaging     | PRIVMSG          | m_message            | -          | required       |
 | Messaging     | TAGMSG           | m_message            | STAG       | recommended    |
 | Messaging     | WALLOPS          | m_wallops            | -          | required       |
+| Metadata      | MDA (E)          | m_metadata           | ENCAP      | recommended    |
+| Metadata      | MDD (E)          | m_metadata           | ENCAP      | recommended    |
+| Metadata      | MDI (E)          | m_metadata           | ENCAP      | recommended    |
+| Metadata      | MDS (E)          | m_metadata           | ENCAP      | recommended    |
 | Miscellaneous | ACK (E)          | cap_labeled_response | ENCAP      | recommended    | 
 | Miscellaneous | BATCH            | m_batch              | STAG       | optional       |
 | Miscellaneous | ENCAP            | m_encap              | ENCAP      | required       |
@@ -1213,6 +1220,127 @@ that a user logged in or out.
 
 Shows statistics for the number of local and global users and channels on the
 hunted server to the source user. The first parameter is unused and ignored.
+
+### MDA (E)
+
+- Capability: **ENCAP**
+- Source: server
+- Propagation: broadcast
+- Implementation: recommended
+- Syntax: `ENCAP * MDA <type> <targetTS> <keyTS> <target> <target2> <key> :<value>`
+
+Adds a new line of data to an existing metadata key on the specified target.
+
+The type parameter should be `U` for user metadata, `C` for channel metadata,
+and `M` for member metadata. If the incoming keyTS is lower than the keyTS
+for the current metadata value, the message is ignored. If the incoming
+targetTS is higher than the targetTS for the target, the message is ignored.
+
+The target1 and target2 parameters are set according to the table below. User
+and channel metadata do not use target2, so the parameter should be a literal
+asterisk (`*`) for these types.
+
+| type | target1      | target2    |
+|------|--------------|------------|
+| M    | channel name | member UID |
+| C    | channel name | `*`        |
+| U    | user UID     | `*`        |
+
+No subscriber notifications are sent as a result of this command. Appending
+values to keys is primarily intended for internal use of metadata storage via
+modules rather than something clients would be subscribing to.
+
+### MDD (E)
+
+- Capability: **ENCAP**
+- Source: server
+- Propagation: broadcast
+- Implementation: recommended
+- Syntax: `ENCAP * MDD <type> <targetTS> <keyTS> <target> <target2> :<keys...>`
+
+Deletes the specified metadata keys (a space-separated list) on the target.
+
+The type parameter should be `U` for user metadata, `C` for channel metadata,
+and `M` for member metadata. If the incoming keyTS is lower than the keyTS
+for the current metadata value, the message is ignored. If the incoming
+targetTS is higher than the targetTS for the target, the message is ignored.
+
+If the keyTS of a key is higher than the specified keyTS, the deletion is
+ignored for that key. If the targetTS of the target is lower than the
+specified targetTS, the command is ignored entirely. The key is not
+immediately deleted from the server, rather the ts of the deletion is recorded
+so that SET commands with earlier keyTS cannot re-introduce the key. Deleted
+keys do not count against published metadata limits. Periodically, deleted
+keys are fully purged from the server to avoid excessive memory usage.
+
+The target1 and target2 parameters follow the same rules as `ENCAP * MDA`.
+
+### MDI (E)
+
+- Capability: **ENCAP**
+- Source: server
+- Propagation: broadcast
+- Implementation: recommended
+- Syntax: `ENCAP * MDI <type> <targetTS> <keyTS> <target> <target2> <key> <read> <write> +<flags> <setter>`
+
+Adjusts information regarding a metadata key's setter or permissions. This
+command should be sent after sending `ENCAP * MDS` to adjust a key's value,
+but may also be sent at any time to adjust the information about a key.
+
+The type parameter should be `U` for user metadata, `C` for channel metadata,
+and `M` for member metadata. If the incoming keyTS does not match the keyTS
+for the current metadata value or a pending update for the metadata value, the
+message is ignored. If the incoming targetTS is higher than the targetTS for
+the target, the message is ignored.
+
+The target1 and target2 parameters follow the same rules as `ENCAP * MDA`.
+
+The setter parameter should be a `nick!user@host` string of the user setting
+the metadata or a server name for server-set metadata.
+
+The read and write parameters denote the permissions needed to read and write
+the metadata value. They can each take one of the following values:
+
+| Value | Read                                               | Write                                              |
+|-------|----------------------------------------------------|----------------------------------------------------|
+| `*`   | All users                                          | This symbol is not valid for write permissions     |
+| `#`   | Channel members/users on shared channels           | This symbol is not valid for write permissions     |
+| `@`   | Channel operators (only valid on channel metadata) | Channel operators (only valid on channel metadata) |
+| `!`   | Self (only valid on user/member metadata)          | Self (only valid on user/member metadata)          |
+| `o`   | Opers with `auspex:metadata`                       | Opers with `auspex:metadata`                       |
+| `S`   | This symbol is not valid for read permissions      | Services only                                      |
+
+The `flags` parameter is a list of flag characters prefixed by `+`. The only
+currently valid flag is `x` which indicates that the entry should not count
+against the target's metadata limits. Unrecognized flag characters are
+ignored. Any flags not present in this list are cleared when overwriting an
+existing metadata entry. Specifying the `x` flag is only valid when the write
+permissions are set to `o` or `S`; it will be ignored in all other cases.
+
+### MDS (E)
+
+- Capability: **ENCAP**
+- Source: server
+- Propagation: broadcast
+- Implementation: recommended
+- Syntax: `ENCAP * MDS <type> <targetTS> <keyTS> <target> <target2> <key> :<value>`
+
+Sets the metadata key on the specified target to the specified value. The
+update will not be complete until `ENCAP * MDI` is sent with the same keyTS.
+While the update is pending, the key will not be visible to clients.
+
+The type parameter should be `U` for user metadata, `C` for channel metadata,
+and `M` for member metadata. If the incoming keyTS is lower than the keyTS
+for the current metadata value, the message is ignored. If the incoming
+targetTS is higher than the targetTS for the target, the message is ignored.
+
+The target1 and target2 parameters follow the same rules as `ENCAP * MDA`.
+
+Metadata limits are checked by the sending server; permission and byte length
+checks must not be repeated by the receiving server.
+
+This command is not used for deleting metadata keys on a target, use
+`ENCAP * MDD` instead to delete keys.
 
 ### MECHLIST (E)
 
