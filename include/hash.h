@@ -31,6 +31,7 @@
 extern rb_dictionary *nd_dict;
 extern rb_radixtree *resv_tree;
 extern rb_radixtree *channel_tree;
+extern rb_radixtree *client_name_tree;
 
 /* Magic value for FNV hash functions */
 #define FNV1_32_INIT 0x811c9dc5UL
