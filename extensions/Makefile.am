@@ -53,6 +53,7 @@ extension_LTLIBRARIES =		\
   m_remove.la			\
   m_sendbans.la			\
   m_shedding.la			\
+  m_token.la            \
   m_webirc.la			\
   no_kill_services.la		\
   no_oper_invis.la		\

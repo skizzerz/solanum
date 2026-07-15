@@ -237,6 +237,9 @@ struct LocalUser
 	/* nicknames theyre monitoring */
 	rb_dlink_list monitor_list;
 
+	/* issued auth tokens */
+	rb_dlink_list auth_tokens;
+
 	/*
 	 * Anti-flood stuff. We track how many messages were parsed and how
 	 * many we were allowed in the current second, and apply a simple decay
