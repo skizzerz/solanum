@@ -43,7 +43,7 @@
 #define LONG_VALUE_200 LONG_VALUE_100 LONG_VALUE_100
 #define LONG_VALUE_400 LONG_VALUE_200 LONG_VALUE_200
 
-#define SYNCLATER_AUTO "Automatic metadata is not supported for this target, please sync manually."
+#define SYNCLATER_AUTO "Automatic metadata is not available right now, please sync manually."
 #define SYNCLATER_RATE_LIMIT "This command could not be completed because it has been used recently, and is rate-limited."
 #define SYNCLATER_PENDING "A SYNC operation is currently in progress, try again after it has completed."
 
@@ -2256,7 +2256,7 @@ static void metadata_sub(void)
 	/* no new subs, so no RPL_METADATASYNCLATER */
 
 	client_util_parse(user, "METADATA * SUB test4 test5 test6 test7 test8");
-	snprintf(expected, sizeof(expected), ":%s FAIL METADATA LIMIT_REACHED test6 5 :Too many subscriptions" CRLF, me.name);
+	snprintf(expected, sizeof(expected), ":%s FAIL METADATA LIMIT_REACHED SUB test6 5 :Too many subscriptions" CRLF, me.name);
 	is_client_sendq_one(expected, user, MSG);
 	snprintf(expected, sizeof(expected), ":%s 770 %s test4 test5" CRLF, me.name, user->name);
 	is_client_sendq_one(expected, user, MSG);
@@ -2264,7 +2264,7 @@ static void metadata_sub(void)
 	is_client_sendq(expected, user, MSG);
 
 	client_util_parse(user, "METADATA * SUB test3 test6 test1");
-	snprintf(expected, sizeof(expected), ":%s FAIL METADATA LIMIT_REACHED test6 5 :Too many subscriptions" CRLF, me.name);
+	snprintf(expected, sizeof(expected), ":%s FAIL METADATA LIMIT_REACHED SUB test6 5 :Too many subscriptions" CRLF, me.name);
 	is_client_sendq_one(expected, user, MSG);
 	snprintf(expected, sizeof(expected), ":%s 770 %s test3" CRLF, me.name, user->name);
 	is_client_sendq(expected, user, MSG);

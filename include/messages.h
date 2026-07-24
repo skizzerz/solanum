@@ -248,6 +248,7 @@
 #define NUMERIC_STR_771      ":%s 771 %s "
 #define NUMERIC_STR_772      ":%s 772 %s %s"
 #define NUMERIC_STR_774      ":%s 774 %s %s %d :%s"
+#define NUMERIC_STR_775      ":%s 775 %s %d %s %s"
 #define NUMERIC_STR_900      ":%s 900 %s %s!%s@%s %s :You are now logged in as %s"
 #define NUMERIC_STR_901      ":%s 901 %s %s!%s@%s :You are now logged out"
 #define NUMERIC_STR_902      ":%s 902 %s :You must use a nick assigned to you"

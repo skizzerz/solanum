@@ -139,6 +139,9 @@ AC_CHECK_SIZEOF(int)
 AC_CHECK_SIZEOF(long)
 AC_CHECK_SIZEOF(long long)
 
+dnl Math
+AC_SEARCH_LIBS(log10, m,,)
+
 dnl Networking Functions
 dnl ====================
 

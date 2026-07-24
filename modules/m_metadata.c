@@ -19,8 +19,10 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include "batch.h"
 #include "stdinc.h"
+#include <math.h>
+
+#include "batch.h"
 #include "channel.h"
 #include "client.h"
 #include "hash.h"
@@ -33,6 +35,7 @@
 #include "msg.h"
 #include "newconf.h"
 #include "numeric.h"
+#include "packet.h"
 #include "ratelimit.h"
 #include "response.h"
 #include "send.h"
@@ -74,7 +77,7 @@
 #define IsMCOperSpy(x) ((x) && ((x)->flags & MC_FLAG_OPERSPY) == MC_FLAG_OPERSPY)
 #define IsMCOverride(x) ((x) && ((x)->flags & MC_FLAG_OVERRIDE) == MC_FLAG_OVERRIDE)
 
-#define SYNCLATER_AUTO "Automatic metadata is not supported for this target, please sync manually."
+#define SYNCLATER_AUTO "Automatic metadata is not available right now, please sync manually."
 #define SYNCLATER_RATE_LIMIT "This command could not be completed because it has been used recently, and is rate-limited."
 #define SYNCLATER_PENDING "A SYNC operation is currently in progress, try again after it has completed."
 
@@ -1229,10 +1232,10 @@ handle_channel_join(void *data_)
 	if (!MyClient(data->client) || !IsClientCapable(data->client, CLICAP_METADATA | CLICAP_BATCH) || subs == NULL)
 		return;
 
-	/* Send out a batch now if we're only sending out a small number of keys and if we're not close to flooding off */
+	/* Send out a batch now if it'll be fairly small */
 	if (rb_dlink_list_length(subs) <= SMALL_METADATA_BATCH_SIZE
-		&& rb_radixtree_size(data->chptr->members) < 20
-		&& rb_linebuf_len(&data->client->localClient->buf_sendq) < get_sendq(data->client) / 2
+		&& rb_radixtree_size(data->chptr->members) < 50
+		&& IsFloodDone(data->client)
 		&& data->client->localClient->metadata_data == NULL)
 	{
 		metadata_client_instantiate(data->client, data->chptr->chname, MC_CMD_SYNC, false);
@@ -1242,16 +1245,20 @@ handle_channel_join(void *data_)
 	}
 	else
 	{
-		/* Otherwise tell clients they need to manually sync */
-		sendto_one(data->client, form_str(RPL_METADATASYNCLATER),
-			me.name, "*", data->chptr->chname, 0, SYNCLATER_AUTO);
+		/* Otherwise tell clients they need to manually sync; use *ALL for joins during flood grace period
+		 * as we're expecting a lot of autojoins here potentially, and *ALL will save bandwidth overall there */
+		sendto_one(data->client, form_str(ERR_METADATASYNCLATER),
+			me.name, data->client->name,
+			!IsFloodDone(data->client) ? "*ALL" : data->chptr->chname,
+			!IsFloodDone(data->client) ? 2 : 0,
+			SYNCLATER_AUTO);
 	}
 
 	/* automatic sync for channel join can result in a ton of lines since we need to also sync all channel members.
 	 * furthermore, this is often sent by the client in a tight loop on startup, often combined with WHO which has
 	 * a lot of lines. As such, always defer syncs for channel joins; ideally, the client does METADATA *ALL SYNC
 	 * at the end rather than once sync per channel */
-	sendto_one(data->client, form_str(RPL_METADATASYNCLATER),
+	sendto_one(data->client, form_str(ERR_METADATASYNCLATER),
 		me.name, data->client->name, data->chptr->chname, 0, SYNCLATER_AUTO);
 }
 
@@ -1318,7 +1325,7 @@ handle_introduce_client(void *data_)
 	{
 		/* Otherwise tell clients they need to manually sync */
 		sendto_monitor_with_capability(data->target, monptr, CLICAP_METADATA | CLICAP_BATCH, NOCAPS,
-			form_str(RPL_METADATASYNCLATER), me.name, "*", data->target->name, 0, SYNCLATER_AUTO);
+			form_str(ERR_METADATASYNCLATER), me.name, "*", data->target->name, 0, SYNCLATER_AUTO);
 	}
 }
 
@@ -1344,7 +1351,7 @@ handle_new_monitor(void *data_)
 	else
 	{
 		/* Otherwise tell clients they need to manually sync */
-		sendto_one(data->client, form_str(RPL_METADATASYNCLATER),
+		sendto_one(data->client, form_str(ERR_METADATASYNCLATER),
 			me.name, "*", target_p->name, 0, SYNCLATER_AUTO);
 	}
 }
@@ -2145,6 +2152,9 @@ metadata_abort(struct MsgBuf *msgbuf, struct Client *source_p, const char *targe
 static void
 metadata_clear(struct MsgBuf *msgbuf, struct Client *source_p, const char *target, int parc, const char *parv[])
 {
+	if (MyClient(source_p) && !IsFloodDone(source_p))
+		flood_endgrace(source_p);
+
 	if (IsChanPrefix(*target))
 	{
 		struct Channel *chptr = find_channel(target);
@@ -2177,9 +2187,11 @@ metadata_clear(struct MsgBuf *msgbuf, struct Client *source_p, const char *targe
 		}
 
 		abort_async_metadata(source_p, false);
-		if (!IsOperGeneral(source_p) && !ratelimit_client(source_p, 1 + channel_metadata_length(chptr, true) / 10))
+		unsigned int tokens = 1 + 5 * (unsigned int)log10(1 + (double)channel_metadata_length(chptr, true));
+		if (!IsOperGeneral(source_p) && !ratelimit_client(source_p, tokens))
 		{
-			sendto_one(source_p, form_str(RPL_LOAD2HI),	me.name, source_p->name, "METADATA");
+			sendto_one(source_p, form_str(ERR_METADATARATELIMIT),
+				me.name, source_p->name, tokens, chptr->chname, "CLEAR");
 			return;
 		}
 
@@ -2206,9 +2218,11 @@ metadata_clear(struct MsgBuf *msgbuf, struct Client *source_p, const char *targe
 		}
 
 		abort_async_metadata(source_p, false);
-		if (!IsOperGeneral(source_p) && !ratelimit_client(source_p, 1 + user_metadata_length(target_p, true) / 10))
+		unsigned int tokens = 1 + 5 * (unsigned int)log10(1 + (double)user_metadata_length(target_p, true));
+		if (!IsOperGeneral(source_p) && !ratelimit_client(source_p, tokens))
 		{
-			sendto_one(source_p, form_str(RPL_LOAD2HI),	me.name, source_p->name, "METADATA");
+			sendto_one(source_p, form_str(ERR_METADATARATELIMIT),
+				me.name, source_p->name, tokens, source_p->name, "CLEAR");
 			return;
 		}
 
@@ -2231,6 +2245,9 @@ metadata_get(struct MsgBuf *msgbuf, struct Client *source_p, const char *target,
 	char batch[BATCH_ID_LEN];
 	char buf[BUFSIZE];
 	rb_dlink_node *ptr;
+
+	if (MyClient(source_p) && !IsFloodDone(source_p))
+		flood_endgrace(source_p);
 
 	if (operspy)
 		target++;
@@ -2387,6 +2404,9 @@ metadata_list(struct MsgBuf *msgbuf, struct Client *source_p, const char *target
 	const char *target_id;
 	unsigned int tokens;
 
+	if (MyClient(source_p) && !IsFloodDone(source_p))
+		flood_endgrace(source_p);
+
 	if (operspy)
 		target++;
 	else if (IsOperSpy(source_p) && !IsChanPrefix(*target) && ConfigFileEntry.operspy_dont_care_user_info)
@@ -2432,7 +2452,8 @@ metadata_list(struct MsgBuf *msgbuf, struct Client *source_p, const char *target
 
 	if (!IsOperGeneral(source_p) && !ratelimit_client(source_p, tokens))
 	{
-		sendto_one(source_p, form_str(RPL_LOAD2HI),	me.name, source_p->name, "METADATA");
+		sendto_one(source_p, form_str(ERR_METADATARATELIMIT),
+			me.name, source_p->name, tokens, norm_target, "LIST");
 		return;
 	}
 
@@ -2453,13 +2474,6 @@ metadata_set(struct MsgBuf *msgbuf, struct Client *source_p, const char *target,
 	const char *norm_target;
 	time_t now = rb_current_time();
 	char hostmask[USERHOST_REPLYLEN];
-
-	if (!IsOperGeneral(source_p) && !ratelimit_client(source_p, 1))
-	{
-		sendto_one(source_p, ":%s FAIL METADATA RATE_LIMITED %s %s 2 :" SYNCLATER_RATE_LIMIT,
-			me.name, sanitize_middle_param(target), sanitize_middle_param(key));
-		return;
-	}
 
 	if (!metadata_key_valid(key))
 	{
@@ -2502,7 +2516,7 @@ metadata_set(struct MsgBuf *msgbuf, struct Client *source_p, const char *target,
 
 			if (MetadataEmpty(entry) && user_metadata_length(source_p, false) >= metadata_max_keys)
 			{
-				sendto_one(source_p, ":%s FAIL METADATA LIMIT_REACHED %s %d :Metadata limit reached",
+				sendto_one(source_p, ":%s FAIL METADATA LIMIT_REACHED SET %s %d :Metadata limit reached",
 					me.name, source_p->name, metadata_max_keys);
 				return;
 			}
@@ -2517,7 +2531,7 @@ metadata_set(struct MsgBuf *msgbuf, struct Client *source_p, const char *target,
 
 			if (MetadataEmpty(entry) && channel_metadata_length(chptr, false) >= metadata_max_keys)
 			{
-				sendto_one(source_p, ":%s FAIL METADATA LIMIT_REACHED %s %d :Metadata limit reached",
+				sendto_one(source_p, ":%s FAIL METADATA LIMIT_REACHED SET %s %d :Metadata limit reached",
 					me.name, chptr->chname, metadata_max_keys);
 				return;
 			}
@@ -2548,7 +2562,7 @@ metadata_set(struct MsgBuf *msgbuf, struct Client *source_p, const char *target,
 
 		if (MetadataEmpty(entry) && user_metadata_length(target_p, false) >= metadata_max_keys)
 		{
-			sendto_one(source_p, ":%s FAIL METADATA LIMIT_REACHED %s %d :Metadata limit reached",
+			sendto_one(source_p, ":%s FAIL METADATA LIMIT_REACHED SET %s %d :Metadata limit reached",
 				me.name, target_p->name, metadata_max_keys);
 			return;
 		}
@@ -2613,6 +2627,15 @@ metadata_set(struct MsgBuf *msgbuf, struct Client *source_p, const char *target,
 	{
 		sendto_one(source_p, ":%s FAIL METADATA INVALID_VALUE %s :Value is too long after server adjustment",
 			me.name, key);
+		if (IsMetadataNew(entry))
+			free_metadata(entry);
+		return;
+	}
+
+	if (!IsOperGeneral(source_p) && !ratelimit_client(source_p, 5))
+	{
+		sendto_one(source_p, form_str(ERR_METADATARATELIMIT) " %s :%s",
+			me.name, source_p->name, 5, sanitize_middle_param(target), "SET", sanitize_middle_param(key), value);
 		if (IsMetadataNew(entry))
 			free_metadata(entry);
 		return;
@@ -2703,7 +2726,7 @@ metadata_sub(struct MsgBuf *msgbuf, struct Client *source_p, const char *target,
 
 		if (client_subs->length >= metadata_max_subs)
 		{
-			sendto_one(source_p, ":%s FAIL METADATA LIMIT_REACHED %s %d :Too many subscriptions",
+			sendto_one(source_p, ":%s FAIL METADATA LIMIT_REACHED SUB %s %d :Too many subscriptions",
 				me.name, key, metadata_max_subs);
 			break;
 		}
@@ -2733,7 +2756,7 @@ metadata_sub(struct MsgBuf *msgbuf, struct Client *source_p, const char *target,
 	{
 		send_multiline_fini(source_p, NULL);
 		if (added)
-			sendto_one(source_p, form_str(RPL_METADATASYNCLATER), me.name, source_p->name, "*ALL", 0, SYNCLATER_AUTO);
+			sendto_one(source_p, form_str(ERR_METADATASYNCLATER), me.name, source_p->name, "*ALL", 0, SYNCLATER_AUTO);
 	}
 	else
 		send_multiline_reset();
@@ -2749,6 +2772,9 @@ metadata_subs(struct MsgBuf *msgbuf, struct Client *source_p, const char *target
 	int items = 0;
 	size_t accum = 0;
 	struct MsgTag tag = { "batch", batch, CLICAP_BATCH };
+
+	if (MyClient(source_p) && !IsFloodDone(source_p))
+		flood_endgrace(source_p);
 
 	if (strcmp(target, "*") != 0 && irccmp(target, source_p->name) != 0)
 	{
@@ -2845,7 +2871,7 @@ metadata_sync(struct MsgBuf *msgbuf, struct Client *source_p, const char *target
 	}
 
 	/* A client may send multiple METADATA SYNC commands in short succession,
-	 * e.g. in response to getting RPL_METADATASYNCLATER for multiple channel joins;
+	 * e.g. in response to getting ERR_METADATASYNCLATER for multiple channel joins;
 	 * don't abort previous SYNCs in this instance and just tell them to retry in a few seconds
 	 * (3 chosen because that's roughly how often the event loop fills up the SendQ for pending SYNCs)
 	 */
@@ -2856,7 +2882,7 @@ metadata_sync(struct MsgBuf *msgbuf, struct Client *source_p, const char *target
 			sendto_one(source_p, ":%s FAIL METADATA IN_PROGRESS %s :A SYNC operation for %s is already in progress",
 				me.name, norm_target, norm_target);
 		else
-			sendto_one(source_p, form_str(RPL_METADATASYNCLATER),
+			sendto_one(source_p, form_str(ERR_METADATASYNCLATER),
 				me.name, source_p->name, norm_target, 3, SYNCLATER_PENDING);
 		return;
 	}
@@ -2864,7 +2890,7 @@ metadata_sync(struct MsgBuf *msgbuf, struct Client *source_p, const char *target
 	abort_async_metadata(source_p, false);
 	if (!IsOperGeneral(source_p) && !ratelimit_client(source_p, tokens))
 	{
-		sendto_one(source_p, form_str(RPL_METADATASYNCLATER),
+		sendto_one(source_p, form_str(ERR_METADATASYNCLATER),
 			me.name, source_p->name, norm_target, tokens, SYNCLATER_RATE_LIMIT);
 		return;
 	}
@@ -2880,6 +2906,9 @@ metadata_unsub(struct MsgBuf *msgbuf, struct Client *source_p, const char *targe
 {
 	int count = 0;
 	rb_dlink_list *client_subs = rb_dictionary_retrieve(client_index, source_p);
+
+	if (MyClient(source_p) && !IsFloodDone(source_p))
+		flood_endgrace(source_p);
 
 	if (strcmp(target, "*") != 0 && irccmp(target, source_p->name) != 0)
 	{
