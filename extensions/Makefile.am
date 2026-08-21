@@ -41,6 +41,7 @@ extension_LTLIBRARIES =		\
   ip_cloaking.la		\
   ip_cloaking_4.0.la		\
   m_adminwall.la		\
+  m_capture.la			\
   m_echotags.la			\
   m_extendchans.la		\
   m_findforwards.la		\

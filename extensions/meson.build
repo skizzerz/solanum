@@ -34,6 +34,7 @@ extension_modules = [
   'ip_cloaking',
   'ip_cloaking_4.0',
   'm_adminwall',
+  'm_capture',
   'm_echotags',
   'm_extendchans',
   'm_findforwards',
