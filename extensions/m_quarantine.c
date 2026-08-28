@@ -74,12 +74,12 @@ static void quarantine_set_allow_channels(void *);
 
 struct Message quarantine_msgtab = {
 	"QUARANTINE", 0, 0, 0, 0,
-	{ mg_unreg, mg_not_oper, mg_not_oper, mg_ignore, { me_quarantine, 3 }, { mo_quarantine, 3 } }
+	{ mg_unreg, { mo_quarantine, 3 }, mg_ignore, mg_ignore, { me_quarantine, 3 }, { mo_quarantine, 3 } }
 };
 
 struct Message unquarantine_msgtab = {
 	"UNQUARANTINE", 0, 0, 0, 0,
-	{ mg_unreg, mg_not_oper, mg_not_oper, mg_ignore, { me_unquarantine, 2 }, { mo_unquarantine, 2 } }
+	{ mg_unreg, { mo_unquarantine, 2 }, mg_ignore, mg_ignore, { me_unquarantine, 2 }, { mo_unquarantine, 2 } }
 };
 
 struct ConfEntry conf_quarantine_table[] = {
@@ -143,6 +143,12 @@ moddeinit(void)
 static void
 mo_quarantine(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source_p, int parc, const char *parv[])
 {
+	if (!IsOper(source_p))
+	{
+		sendto_one_numeric(source_p, ERR_NOPRIVILEGES, form_str(ERR_NOPRIVILEGES));
+		return;
+	}
+
 	if (!IsOperQuarantine(source_p))
 	{
 		sendto_one(source_p, form_str(ERR_NOPRIVS), me.name, source_p->name, "quarantine");
@@ -180,6 +186,12 @@ me_quarantine(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *s
 static void
 mo_unquarantine(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source_p, int parc, const char *parv[])
 {
+	if (!IsOper(source_p))
+	{
+		sendto_one_numeric(source_p, ERR_NOPRIVILEGES, form_str(ERR_NOPRIVILEGES));
+		return;
+	}
+
 	if (!IsOperQuarantine(source_p))
 	{
 		sendto_one(source_p, form_str(ERR_NOPRIVS), me.name, source_p->name, "quarantine");
