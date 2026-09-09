@@ -71,27 +71,100 @@ init_modules(void)
 	mod_add_path(ircd_paths[IRCD_PATH_AUTOLOAD_MODULES]);
 }
 
-static unsigned int prev_caps;
+static uint64_t prev_cli_caps;
+static uint64_t prev_serv_caps;
 
 void
-mod_remember_clicaps(void)
+mod_remember_caps(void)
 {
-	prev_caps = capability_index_mask(cli_capindex);
+	prev_cli_caps = capability_index_mask(cli_capindex);
+	prev_serv_caps = capability_index_mask(serv_capindex);
 }
 
 void
-mod_notify_clicaps(void)
+mod_notify_caps(void)
 {
-	unsigned int cur_caps = capability_index_mask(cli_capindex);
-	unsigned int del = prev_caps & ~cur_caps;
-	unsigned int new = cur_caps & ~prev_caps;
+	char buf[BUFSIZE];
+	char *p;
+	rb_dictionary_iter iter;
+	struct Client *target_p;
+	struct CapabilityEntry *entry;
+	rb_dlink_node *ptr;
 
-	if (del)
-		sendto_local_clients_with_capability(CLICAP_CAP_NOTIFY, ":%s CAP * DEL :%s",
-				me.name, capability_index_list(cli_capindex, del));
-	if (new)
-		sendto_local_clients_with_capability(CLICAP_CAP_NOTIFY, ":%s CAP * NEW :%s",
-				me.name, capability_index_list(cli_capindex, new));
+	uint64_t cur_cli_caps = capability_index_mask(cli_capindex);
+	uint64_t cur_serv_caps = capability_index_mask(serv_capindex);
+	uint64_t del_cli = prev_cli_caps & ~cur_cli_caps;
+	uint64_t new_cli = cur_cli_caps & ~prev_cli_caps;
+	uint64_t new_serv = cur_serv_caps & ~prev_serv_caps;
+
+	if (del_cli)
+	{
+		RB_DLINK_FOREACH(ptr, lclient_list.head)
+		{
+			target_p = ptr->data;
+			if (!IsClientCapable(target_p, CLICAP_CAP_NOTIFY))
+				continue;
+
+			send_multiline_init(target_p, " ", ":%s CAP %s DEL :",
+				me.name, target_p->name);
+
+			RB_DICTIONARY_FOREACH(entry, &iter, cli_capindex->cap_dict)
+			{
+				if ((1ull << entry->value) & del_cli && capability_visible(target_p, entry))
+					send_multiline_item(target_p, "%s", entry->cap);
+			}
+
+			send_multiline_fini(target_p, NULL);
+		}
+	}
+
+	if (new_cli)
+	{
+		RB_DLINK_FOREACH(ptr, lclient_list.head)
+		{
+			target_p = ptr->data;
+			if (!IsClientCapable(target_p, CLICAP_CAP_NOTIFY))
+				continue;
+
+			send_multiline_init(target_p, " ", ":%s CAP %s NEW :",
+				me.name, target_p->name);
+
+			RB_DICTIONARY_FOREACH(entry, &iter, cli_capindex->cap_dict)
+			{
+				struct ClientCapability *clicap = entry->ownerdata;
+
+				if ((1ull << entry->value) & new_cli && capability_visible(target_p, entry))
+				{
+					const char *data = NULL;
+					if (target_p->flags & FLAGS_CLICAP_DATA && clicap != NULL && clicap->data != NULL)
+						data = clicap->data(target_p);
+
+					if (data)
+						send_multiline_item(target_p, "%s=%s", entry->cap, data);
+					else
+						send_multiline_item(target_p, "%s", entry->cap);
+				}
+			}
+
+			send_multiline_fini(target_p, NULL);
+		}
+	}
+
+	if (new_serv)
+	{
+		const char *newcaps = capability_index_list(serv_capindex, new_serv);
+		RB_DLINK_FOREACH(ptr, serv_list.head)
+		{
+			struct Client *server_p = ptr->data;
+			sendto_one(server_p, ":%s ENCAP %s NEWCAP :%s",
+				me.id, server_p->name, newcaps);
+
+			/* If we were previously given a newly-loaded CAPAB from a server, enable it on that server */
+			rb_strlcpy(buf, server_p->localClient->fullcaps, sizeof(buf));
+			for (char *cap = rb_strtok_r(buf, " ", &p); cap; cap = rb_strtok_r(NULL, " ", &p))
+				SetServerCap(server_p, capability_get(serv_capindex, cap, NULL));
+		}
+	}
 }
 
 /* mod_find_path()
@@ -819,7 +892,7 @@ modules_do_reload(void *info_)
 	check_core = mod->core;
 	path = rb_strdup(mod->path);
 
-	mod_remember_clicaps();
+	mod_remember_caps();
 
 	if(unload_one_module(m_bn, true) == false)
 	{
@@ -838,7 +911,7 @@ modules_do_reload(void *info_)
 		exit(0);
 	}
 
-	mod_notify_clicaps();
+	mod_notify_caps();
 
 	rb_free(info);
 	rb_free(m_bn);
@@ -851,7 +924,7 @@ modules_do_restart(void *unused)
 	unsigned int modnum = 0;
 	rb_dlink_node *ptr, *nptr;
 
-	mod_remember_clicaps();
+	mod_remember_caps();
 
 	RB_DLINK_FOREACH_SAFE(ptr, nptr, module_list.head)
 	{
@@ -875,7 +948,7 @@ modules_do_restart(void *unused)
 	load_all_modules(false);
 	rehash(false);
 
-	mod_notify_clicaps();
+	mod_notify_caps();
 
 	sendto_realops_snomask(SNO_GENERAL, L_NETWIDE,
 			     "Module Restart: %u modules unloaded, %lu modules loaded",

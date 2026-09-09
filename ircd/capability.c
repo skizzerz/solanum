@@ -89,6 +89,7 @@ capability_put(struct CapabilityIndex *idx, const char *cap, void *ownerdata)
 	entry->flags = 0;
 	entry->value = idx->highest_bit;
 	entry->ownerdata = ownerdata;
+	entry->index = idx;
 
 	rb_dictionary_add(idx->cap_dict, entry->cap, entry);
 
@@ -164,6 +165,19 @@ capability_destroy(rb_dictionary_element *delem, void *privdata)
 	struct CapabilityEntry *entry = delem->data;
 	rb_free((char *)entry->cap);
 	rb_free(entry);
+}
+
+extern bool
+capability_visible(struct Client *client_p, const struct CapabilityEntry *cap)
+{
+	if (cap->index != cli_capindex || cap->ownerdata == NULL)
+		return true;
+
+	struct ClientCapability *clicap = cap->ownerdata;
+	if (clicap->visible == NULL)
+		return !(clicap->flags & CLICAP_FLAGS_INVISIBLE);
+
+	return clicap->visible(client_p);
 }
 
 struct CapabilityIndex *

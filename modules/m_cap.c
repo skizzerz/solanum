@@ -66,20 +66,8 @@ DECLARE_MODULE_AV2(cap, NULL, NULL, cap_clist, NULL, NULL, NULL, NULL, cap_desc)
 static inline int
 clicap_visible(struct Client *client_p, const struct CapabilityEntry *cap)
 {
-	struct ClientCapability *clicap;
-
 	/* orphaned caps shouldn't be visible */
-	if (cap->flags & CAP_ORPHANED)
-		return 0;
-
-	if (cap->ownerdata == NULL)
-		return 1;
-
-	clicap = cap->ownerdata;
-	if (clicap->visible == NULL)
-		return (clicap->flags & CLICAP_FLAGS_INVISIBLE) == 0;
-
-	return clicap->visible(client_p);
+	return !(cap->flags & CAP_ORPHANED) && capability_visible(client_p, cap);
 }
 
 /* clicap_find()

@@ -24,6 +24,8 @@
 #include "stdinc.h"
 #include "rb_dictionary.h"
 
+struct Client;
+
 struct CapabilityIndex {
 	const char *name;
 	rb_dictionary *cap_dict;
@@ -39,6 +41,7 @@ struct CapabilityEntry {
 	unsigned int value;
 	unsigned int flags;
 	void *ownerdata;
+	struct CapabilityIndex *index;
 };
 
 extern struct CapabilityEntry *capability_find(struct CapabilityIndex *idx, const char *cap);
@@ -47,6 +50,7 @@ extern uint64_t capability_put(struct CapabilityIndex *idx, const char *cap, voi
 extern uint64_t capability_put_anonymous(struct CapabilityIndex *idx);
 extern void capability_orphan(struct CapabilityIndex *idx, const char *cap);
 extern void capability_require(struct CapabilityIndex *idx, const char *cap);
+extern bool capability_visible(struct Client *client_p, const struct CapabilityEntry *cap);
 
 extern struct CapabilityIndex *capability_index_create(const char *name);
 extern void capability_index_destroy(struct CapabilityIndex *);

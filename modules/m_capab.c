@@ -30,22 +30,30 @@
 #include "msg.h"
 #include "parse.h"
 #include "modules.h"
+#include "send.h"
 
 static const char capab_desc[] = "Provides the commands used for server-to-server capability negotiation";
 
 static void mr_capab(struct MsgBuf *, struct Client *, struct Client *, int, const char **);
 static void me_gcap(struct MsgBuf *, struct Client *, struct Client *, int, const char **);
+static void me_newcap(struct MsgBuf *, struct Client *, struct Client *, int, const char **);
 
 struct Message capab_msgtab = {
 	"CAPAB", 0, 0, 0, 0,
 	{{mr_capab, 2}, mg_ignore, mg_ignore, mg_ignore, mg_ignore, mg_ignore}
 };
+
 struct Message gcap_msgtab = {
 	"GCAP", 0, 0, 0, 0,
 	{mg_ignore, mg_ignore, mg_ignore, mg_ignore, {me_gcap, 2}, mg_ignore}
 };
 
-mapi_clist_av1 capab_clist[] = { &capab_msgtab, &gcap_msgtab, NULL };
+struct Message newcap_msgtab = {
+	"NEWCAP", 0, 0, 0, 0,
+	{mg_ignore, mg_ignore, mg_ignore, mg_ignore, {me_newcap, 2}, mg_ignore}
+};
+
+mapi_clist_av1 capab_clist[] = { &capab_msgtab, &gcap_msgtab, &newcap_msgtab, NULL };
 
 DECLARE_MODULE_AV2(capab, NULL, NULL, capab_clist, NULL, NULL, NULL, NULL, capab_desc);
 
@@ -118,4 +126,49 @@ me_gcap(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source_
 
 	for (s = rb_strtok_r(t, " ", &p); s; s = rb_strtok_r(NULL, " ", &p))
 		source_p->serv->server_caps |= capability_get(serv_capindex, s, NULL);
+}
+
+static void
+me_newcap(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source_p,
+		int parc, const char *parv[])
+{
+	char newcaps[BUFSIZE];
+	char existing[BUFSIZE];
+	char fullcaps[BUFSIZE];
+	char *p1, *p2;
+
+	if (!MyConnect(source_p) || !IsServer(source_p))
+		return;
+
+	rb_strlcpy(fullcaps, source_p->localClient->fullcaps, sizeof(fullcaps));
+
+	for (char *new = rb_strtok_r(newcaps, " ", &p1); new; new = rb_strtok_r(NULL, " ", &p1))
+	{
+		SetServerCap(source_p, capability_get(serv_capindex, new, NULL));
+
+		/* don't append this to fullcaps if it's a duplicate */
+		bool dup = false;
+		rb_strlcpy(existing, source_p->localClient->fullcaps, sizeof(existing));
+		for (char *cap = rb_strtok_r(existing, " ", &p2); cap; cap = rb_strtok_r(NULL, " ", &p2))
+		{
+			if (!rb_strcasecmp(cap, new))
+			{
+				dup = true;
+				break;
+			}
+		}
+
+		if (!dup)
+		{
+			rb_strlcat(fullcaps, " ", sizeof(fullcaps));
+			rb_strlcat(fullcaps, new, sizeof(fullcaps));
+		}
+	}
+
+	rb_free(source_p->localClient->fullcaps);
+	source_p->localClient->fullcaps = rb_strdup(fullcaps);
+	rb_free(source_p->serv->fullcaps);
+	source_p->serv->fullcaps = rb_strdup(fullcaps);
+	sendto_server(client_p, NULL, NOCAPS, NOCAPS, ":%s ENCAP * GCAP :%s",
+		use_id(source_p), fullcaps);
 }

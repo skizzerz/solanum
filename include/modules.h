@@ -131,8 +131,8 @@ void mod_add_path(const char *path);
 void mod_clear_paths(void);
 
 /* cap-notify utilities */
-extern void mod_remember_clicaps(void);
-extern void mod_notify_clicaps(void);
+extern void mod_remember_caps(void);
+extern void mod_notify_caps(void);
 
 /* load a module */
 extern void load_module(char *path);
