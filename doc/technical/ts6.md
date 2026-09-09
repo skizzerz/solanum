@@ -395,6 +395,7 @@ detail in subsections in alphabetical order. Commands which are sent over
 | Linking       | CAPAB            | m_capab              | -          | required       |
 | Linking       | CONNECT          | m_connect            | -          | optional       |
 | Linking       | GCAP (E)         | m_capab              | ENCAP      | recommended    |
+| Linking       | NEWCAP (E)       | m_capab              | ENCAP      | recommended    |
 | Linking       | PASS             | m_pass               | -          | required       |
 | Linking       | SERVER           | m_server             | -          | required       |
 | Linking       | SID              | m_server             | -          | required       |
@@ -973,9 +974,9 @@ The target server determines the new limit, rather than the sending server.
 - Syntax: `ENCAP * GCAP :<caps...>`
 
 Advertises the source's server capabilities to the rest of the network. This
-command must be sent once when the server is first introduced and cannot be
-sent again for that server. The caps parameter is a space-separated list of
-capability names.
+command must be sent once when the server is first introduced; sending it
+again will replace the previously-sent list of capabilities for that server.
+The caps parameter is a space-separated list of capability names.
 
 ### GRANT (E)
 
@@ -1343,6 +1344,20 @@ Unloads the given module by name. Core modules cannot be unloaded.
 - Syntax: `MOTD :<hunted>`
 
 Displays the MOTD for the specified server.
+
+### NEWCAP (E)
+
+- Capability: **ENCAP**
+- Source: server
+- Propagation: special
+- Implementation: recommended
+- Syntax: `ENCAP <server> NEWCAP :<capabs>`
+
+This command is only accepted from directly linked servers and is used to
+advertise that the linked server supports a new server capability. The capabs
+parameter is a space-separated list of new capabilities. When propagating to
+other servers on the network, `ENCAP * GCAP` must be used instead, passing the
+full list of capabilities supported by that server (including the new one).
 
 ### NICK
 

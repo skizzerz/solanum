@@ -243,12 +243,12 @@ do_modload(struct Client *source_p, const char *module)
 		return;
 	}
 
-	mod_remember_clicaps();
+	mod_remember_caps();
 
 	origin = strcmp(module, m_bn) == 0 ? MAPI_ORIGIN_CORE : MAPI_ORIGIN_EXTENSION;
 	load_one_module(module, origin, false);
 
-	mod_notify_clicaps();
+	mod_notify_caps();
 
 	rb_free(m_bn);
 }
@@ -273,12 +273,12 @@ do_modunload(struct Client *source_p, const char *module)
 		return;
 	}
 
-	mod_remember_clicaps();
+	mod_remember_caps();
 
 	if(unload_one_module(m_bn, true) == false)
 		sendto_one_notice(source_p, ":Module %s is not loaded", m_bn);
 
-	mod_notify_clicaps();
+	mod_notify_caps();
 
 	rb_free(m_bn);
 }
