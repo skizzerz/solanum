@@ -15,7 +15,8 @@ SYMLINKS=	topic accept cmode admin names links away whowas \
 		version kick who invite quit join list nick oper part \
 		time credits motd userhost users whois ison lusers \
 		user help pass error challenge knock ping pong \
-		map trace chantrace extban monitor batch findforwards
+		map trace chantrace extban monitor batch findforwards \
+		metadata
 
 all:
 build:

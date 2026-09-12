@@ -111,8 +111,7 @@ m_knock(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *source_
 	}
 
 	if(!((chptr->mode.mode & MODE_INVITEONLY) || (*chptr->mode.key) ||
-	     (chptr->mode.limit &&
-	      rb_dlink_list_length(&chptr->members) >= (unsigned long)chptr->mode.limit)))
+	     (chptr->mode.limit && rb_radixtree_size(chptr->members) >= (size_t)chptr->mode.limit)))
 	{
 		sendto_one_numeric(source_p, ERR_CHANOPEN,
 				   form_str(ERR_CHANOPEN), name);

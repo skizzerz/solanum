@@ -63,7 +63,7 @@ struct rb_radixtree
 	void (*canonize_cb)(char *key);
 	rb_radixtree_elem *root;
 
-	unsigned int count;
+	size_t count;
 	char *id;
 
 	rb_dlink_node node;
@@ -152,7 +152,7 @@ first_leaf(rb_radixtree_elem *delem)
  * Dictionary object factory.
  *
  * Inputs:
- *     - patricia name
+ *     - patricia name (or NULL to not track this tree in /STATS B)
  *     - function to use for canonizing keys (for example, use
  *       a function that makes the string upper case to create
  *       a patricia with case-insensitive matching)
@@ -170,10 +170,13 @@ rb_radixtree_create(const char *name, void (*canonize_cb)(char *key))
 	rb_radixtree *dtree = (rb_radixtree *) rb_malloc(sizeof(rb_radixtree));
 
 	dtree->canonize_cb = canonize_cb;
-	dtree->id = rb_strdup(name);
 	dtree->root = NULL;
 
-	rb_dlinkAdd(dtree, &dtree->node, &radixtree_list);
+	if (name != NULL)
+	{
+		dtree->id = rb_strdup(name);
+		rb_dlinkAdd(dtree, &dtree->node, &radixtree_list);
+	}
 
 	return dtree;
 }
@@ -221,8 +224,12 @@ rb_radixtree_destroy(rb_radixtree *dtree, void (*destroy_cb)(const char *key, vo
 		rb_radixtree_delete(dtree, delem->leaf.key);
 	}
 
-	rb_dlinkDelete(&dtree->node, &radixtree_list);
-	rb_free(dtree->id);
+	if (dtree->id != NULL)
+	{
+		rb_dlinkDelete(&dtree->node, &radixtree_list);
+		rb_free(dtree->id);
+	}
+
 	rb_free(dtree);
 }
 
@@ -991,7 +998,7 @@ rb_radixtree_elem_get_data(rb_radixtree_leaf *leaf)
  * Side Effects:
  *     - none
  */
-unsigned int
+size_t
 rb_radixtree_size(rb_radixtree *dict)
 {
 	lrb_assert(dict != NULL);

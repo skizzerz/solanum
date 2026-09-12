@@ -601,8 +601,7 @@ sendto_channel_flags_internal(struct Client *one, int type, struct Client *sourc
 	char local_source[USERHOST_REPLYLEN];
 	struct Client *target_p;
 	struct membership *msptr;
-	rb_dlink_node *ptr;
-	rb_dlink_node *next_ptr;
+	rb_radixtree_iteration_state state;
 	struct MsgBuf msgbuf;
 	struct MsgBuf_cache msgbuf_cache;
 
@@ -632,9 +631,8 @@ sendto_channel_flags_internal(struct Client *one, int type, struct Client *sourc
 
 	msgbuf_cache_init(&msgbuf_cache, &msgbuf, local_source, use_id(source_p));
 
-	RB_DLINK_FOREACH_SAFE(ptr, next_ptr, chptr->members.head)
+	RB_RADIXTREE_FOREACH(msptr, &state, chptr->members)
 	{
-		msptr = ptr->data;
 		target_p = msptr->client_p;
 
 		if (!MyClient(source_p) && (IsIOError(target_p->from) || target_p->from == one))
@@ -736,8 +734,7 @@ sendto_channel_opmod_internal(struct Client *one, struct Client *source_p, struc
 	char chbuf[CHANNELLEN + 2];
 	struct Client *target_p;
 	struct membership *msptr;
-	rb_dlink_node *ptr;
-	rb_dlink_node *next_ptr;
+	rb_radixtree_iteration_state state;
 	struct MsgBuf msgbuf_statusmsg;
 	struct MsgBuf msgbuf_eopmod;
 	struct MsgBuf msgbuf_old;
@@ -785,9 +782,8 @@ sendto_channel_opmod_internal(struct Client *one, struct Client *source_p, struc
 
 	current_serial++;
 
-	RB_DLINK_FOREACH_SAFE(ptr, next_ptr, chptr->members.head)
+	RB_RADIXTREE_FOREACH(msptr, &state, chptr->members)
 	{
-		msptr = ptr->data;
 		target_p = msptr->client_p;
 
 		if (!MyClient(source_p) && (IsIOError(target_p->from) || target_p->from == one))

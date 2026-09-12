@@ -15,6 +15,7 @@ Server notice masks: (? designates that the snomask is provided
      ? +F     - Global client connections and exits
        +k     - Server and service kill messages
      ? +l     - Channel creations
+       +m     - Metadata changes
        +n     - Local client nick changes (global via extension)
        +r     - Invalid usernames and DNSBL listings
        +s     - Generic server messages and oper kills

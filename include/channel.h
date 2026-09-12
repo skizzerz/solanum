@@ -31,8 +31,9 @@
 #define MAXMODEPARAMS   4
 #define MAXMODEPARAMSSERV 10
 
-#include <setup.h>
+#include "stdinc.h"
 #include "hook.h"
+#include "rb_radixtree.h"
 
 struct Client;
 
@@ -58,7 +59,7 @@ struct Channel
 	time_t topic_time;
 	time_t last_knock;	/* don't allow knock to flood */
 
-	rb_dlink_list members;	/* channel members */
+	rb_radixtree *members;	/* channel members */
 	rb_dlink_list locmembers;	/* local channel members */
 
 	rb_dlink_list invites;
@@ -82,11 +83,13 @@ struct Channel
 	time_t last_checked_ts;
 	unsigned int last_checked_type;
 	int last_checked_result;
+
+	rb_dlink_list metadata;
 };
 
 struct membership
 {
-	rb_dlink_node channode;
+	rb_radixtree_leaf *channode;
 	rb_dlink_node locchannode;
 	rb_dlink_node usernode;
 
@@ -95,6 +98,7 @@ struct membership
 	unsigned int flags;
 
 	time_t bants;
+	rb_dlink_list metadata;
 };
 
 #define BANLEN 195

@@ -22,6 +22,8 @@
 #ifndef SOLANUM__MSGBUF_H
 #define SOLANUM__MSGBUF_H
 
+#include "stdinc.h"
+
 #define MAXPARA		(15)
 #define MAXTAGS (30)
 

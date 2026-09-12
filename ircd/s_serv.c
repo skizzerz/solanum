@@ -581,7 +581,7 @@ burst_TS6(struct Client *client_p)
 	hook_data_client hclientinfo;
 	hook_data_channel hchaninfo;
 	rb_dlink_node *ptr;
-	rb_dlink_node *uptr;
+	rb_radixtree_iteration_state state;
 	char *t;
 	int tlen, mlen;
 	int cur_len = 0;
@@ -674,10 +674,8 @@ burst_TS6(struct Client *client_p)
 
 		t = buf + mlen;
 
-		RB_DLINK_FOREACH(uptr, chptr->members.head)
+		RB_RADIXTREE_FOREACH(msptr, &state, chptr->members)
 		{
-			msptr = uptr->data;
-
 			tlen = strlen(use_id(msptr->client_p)) + 1;
 			if(is_chanop(msptr))
 				tlen++;
@@ -699,7 +697,7 @@ burst_TS6(struct Client *client_p)
 			t += tlen;
 		}
 
-		if (rb_dlink_list_length(&chptr->members) > 0)
+		if (rb_radixtree_size(chptr->members) > 0)
 		{
 			/* remove trailing space */
 			*(t-1) = '\0';

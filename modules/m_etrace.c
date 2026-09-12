@@ -248,7 +248,7 @@ m_chantrace(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *sou
 	struct membership *msptr;
 	const char *sockhost;
 	const char *name;
-	rb_dlink_node *ptr;
+	rb_radixtree_iteration_state state;
 	int operspy = 0;
 
 	name = parv[1];
@@ -286,9 +286,8 @@ m_chantrace(struct MsgBuf *msgbuf_p, struct Client *client_p, struct Client *sou
 
 	begin_local_response_batch();
 
-	RB_DLINK_FOREACH(ptr, chptr->members.head)
+	RB_RADIXTREE_FOREACH(msptr, &state, chptr->members)
 	{
-		msptr = ptr->data;
 		target_p = msptr->client_p;
 
 		if(EmptyString(target_p->sockhost))

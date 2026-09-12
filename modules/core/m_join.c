@@ -1194,7 +1194,7 @@ static void
 remove_our_modes(struct Channel *chptr, struct Client *source_p)
 {
 	struct membership *msptr;
-	rb_dlink_node *ptr;
+	rb_radixtree_iteration_state state;
 	char lmodebuf[MODEBUFLEN];
 	char *lpara[MAXMODEPARAMS];
 	int count = 0;
@@ -1206,10 +1206,8 @@ remove_our_modes(struct Channel *chptr, struct Client *source_p)
 	for(i = 0; i < MAXMODEPARAMS; i++)
 		lpara[i] = NULL;
 
-	RB_DLINK_FOREACH(ptr, chptr->members.head)
+	RB_RADIXTREE_FOREACH(msptr, &state, chptr->members)
 	{
-		msptr = ptr->data;
-
 		if(is_chanop(msptr))
 		{
 			msptr->flags &= ~CHFL_CHANOP;

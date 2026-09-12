@@ -63,6 +63,7 @@
 #include "privilege.h"
 #include "bandbi.h"
 #include "authproc.h"
+#include "metadata.h"
 #include "operhash.h"
 #include "response.h"
 
@@ -659,6 +660,7 @@ solanum_main(int argc, char * const argv[])
 	whowas_init();
 	init_reject();
 	init_cache();
+	init_metadata();
 	init_monitor();
 	init_response();
 

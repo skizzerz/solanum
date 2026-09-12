@@ -8,7 +8,7 @@ user_symlinks = [
   'oper', 'part', 'time', 'credits', 'motd', 'userhost', 'users', 'whois',
   'ison', 'lusers', 'user', 'help', 'pass', 'error', 'challenge', 'knock',
   'ping', 'pong', 'map', 'trace', 'chantrace', 'extban', 'monitor', 'batch',
-  'findforwards'
+  'findforwards', 'metadata'
 ]
 
 install_subdir('users',

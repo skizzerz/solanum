@@ -133,6 +133,7 @@ rb_pipe
 rb_radixtree_add
 rb_radixtree_create
 rb_radixtree_delete
+rb_radixtree_destroy
 rb_radixtree_elem_add
 rb_radixtree_elem_delete
 rb_radixtree_elem_find

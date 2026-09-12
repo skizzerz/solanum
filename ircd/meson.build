@@ -50,6 +50,7 @@ libircd_sources = files(
   'listener.c',
   'logger.c',
   'match.c',
+  'metadata.c',
   'modules.c',
   'monitor.c',
   'msgbuf.c',

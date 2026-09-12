@@ -30,6 +30,7 @@ autoload_modules = [
   'm_list',
   'm_lusers',
   'm_map',
+  'm_metadata',
   'm_monitor',
   'm_motd',
   'm_names',
@@ -77,7 +78,7 @@ foreach mod : autoload_modules
     mod + '.c',
     name_prefix: '',
     name_suffix: 'so',
-    dependencies: [libircd_dep, librb_dep, global_include_dep],
+    dependencies: [libircd_dep, librb_dep, global_include_dep, m_dep],
     install: true,
     install_dir: moduledir / 'autoload'
   )
