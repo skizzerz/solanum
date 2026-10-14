@@ -392,7 +392,7 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 		}
 	}
 
-	snprintf(origin, sizeof(origin), IsPerson(source_p) ? "%s!%s@%s" : "%s",
+	snprintf(origin, sizeof(origin), IsPerson(source_p) && MyClient(target_p) ? "%s!%s@%s" : "%s",
 		get_id(source_p, target_p), source_p->username, source_p->host);
 
 	struct MsgTag inner_tags[] = {
