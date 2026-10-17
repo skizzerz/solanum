@@ -298,14 +298,16 @@ m_message(enum message_type msgtype, struct MsgBuf *msgbuf_p,
 		return;
 
 	/* if any targets are remote, start a remote batch since the echo-message will come from the remote server */
-	rb_dlink_list slist = {0};
-	rb_dlink_node *ptr, *nptr;
+	int remote_targets = 0;
+	int remote_chain_length = 0;
 	const char *serv_mask = NULL;
 
 	for (int i = 0; i < ntargets; i++)
 	{
 		if (targets[i].type != ENTITY_CLIENT || MyConnect(targets[i].target_p))
 			continue;
+
+		remote_targets++;
 
 		if (serv_mask == NULL)
 			serv_mask = targets[i].target_p->servptr->name;
@@ -315,30 +317,11 @@ m_message(enum message_type msgtype, struct MsgBuf *msgbuf_p,
 
 		/* in the event serv_mask == "*" we need to know how many servers we'll expect a response from */
 		for (struct Client *sptr = targets[i].target_p->servptr; !IsMe(sptr); sptr = sptr->servptr)
-		{
-			bool found = false;
-			RB_DLINK_FOREACH(ptr, slist.head)
-			{
-				const char *sname = ptr->data;
-				if (!strcmp(sname, sptr->servptr->name))
-				{
-					found = true;
-					break;
-				}
-			}
-
-			if (!found)
-				rb_dlinkAddAlloc(sptr->servptr->name, &slist);
-		}
+			remote_chain_length++;
 	}
 
 	if (serv_mask != NULL)
-		begin_remote_response_batch(*serv_mask == '*' ? slist.length : 1, serv_mask);
-
-	RB_DLINK_FOREACH_SAFE(ptr, nptr, slist.head)
-	{
-		rb_dlinkDestroy(ptr, &slist);
-	}
+		begin_remote_response_batch(*serv_mask == '*' ? remote_chain_length : remote_targets, serv_mask);
 
 	for (int i = 0; i < ntargets; i++)
 	{
