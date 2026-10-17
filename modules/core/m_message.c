@@ -297,6 +297,49 @@ m_message(enum message_type msgtype, struct MsgBuf *msgbuf_p,
 	if (ntargets <= 0)
 		return;
 
+	/* if any targets are remote, start a remote batch since the echo-message will come from the remote server */
+	rb_dlink_list slist = {0};
+	rb_dlink_node *ptr, *nptr;
+	const char *serv_mask = NULL;
+
+	for (int i = 0; i < ntargets; i++)
+	{
+		if (targets[i].type != ENTITY_CLIENT || MyConnect(targets[i].target_p))
+			continue;
+
+		if (serv_mask == NULL)
+			serv_mask = targets[i].target_p->servptr->name;
+		else if (strcmp(serv_mask, targets[i].target_p->servptr->name) != 0)
+			/* if there's more than one remote server, use * since the s2s tag only accepts one mask */
+			serv_mask = "*";
+
+		/* in the event serv_mask == "*" we need to know how many servers we'll expect a response from */
+		for (struct Client *sptr = targets[i].target_p->servptr; !IsMe(sptr); sptr = sptr->servptr)
+		{
+			bool found = false;
+			RB_DLINK_FOREACH(ptr, slist.head)
+			{
+				const char *sname = ptr->data;
+				if (!strcmp(sname, sptr->servptr->name))
+				{
+					found = true;
+					break;
+				}
+			}
+
+			if (!found)
+				rb_dlinkAddAlloc(sptr->servptr->name, &slist);
+		}
+	}
+
+	if (serv_mask != NULL)
+		begin_remote_response_batch(*serv_mask == '*' ? slist.length : 1, serv_mask);
+
+	RB_DLINK_FOREACH_SAFE(ptr, nptr, slist.head)
+	{
+		rb_dlinkDestroy(ptr, &slist);
+	}
+
 	for (int i = 0; i < ntargets; i++)
 	{
 		switch (targets[i].type)
@@ -1192,7 +1235,6 @@ msg_client(enum message_type msgtype,
 	}
 	else
 	{
-		begin_remote_response_batch(1, target_p->servptr->name);
 		sendto_anywhere_tags(target_p, source_p, cmdname[msgtype],
 			msgtype == MESSAGE_TYPE_TAGMSG ? CAP_STAG : NOCAPS,
 			NOCAPS, msgbuf_p->n_tags, msgbuf_p->tags,
@@ -1212,7 +1254,6 @@ msg_client_targeted(enum message_type msgtype,
 {
 	s_assert(!IsMe(target_p) && IsServer(target_p));
 
-	begin_remote_response_batch(1, target_p->servptr->name);
 	sendto_one_tags(target_p,
 		msgtype == MESSAGE_TYPE_TAGMSG ? CAP_STAG : NOCAPS,
 		NOCAPS, msgbuf_p->n_tags, msgbuf_p->tags,
