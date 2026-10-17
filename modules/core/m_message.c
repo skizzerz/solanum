@@ -976,6 +976,10 @@ echo_msg(struct Client *source_p, struct Client *target_p,
 {
 	const char *fmt = msgtype == MESSAGE_TYPE_TAGMSG ? ":%s!%s@%s %s %s" : ":%s!%s@%s %s %s :%s";
 
+	/* avoid pointless s2s traffic by echoing messages from services back to services */
+	if (IsService(target_p))
+		return;
+
 	if (MyClient(target_p))
 	{
 		if (!IsClientCapable(target_p, CLICAP_ECHO_MESSAGE))
