@@ -121,6 +121,8 @@ multiline_moddeinit(void)
 {
 	remove_batch_handler("draft/multiline");
 	remove_batch_handler("multiline");
+	remove_conf_item("general", "multiline_max_bytes");
+	remove_conf_item("general", "multiline_max_lines");
 }
 
 static const char *
@@ -407,9 +409,14 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 	if ((MyClient(target_p) && IsClientCapable(target_p, CLICAP_MULTILINE | CLICAP_BATCH))
 		|| (!MyClient(target_p) && IsServerCapable(target_p->from, CAP_MULTILINE)))
 	{
+		/* suppress labeled-response on the primary message if they're messaging themselves */
+		struct ResponseInfo *info = outgoing_response_info;
+		if (source_p == target_p)
+			suspend_response_batch();
+
 		sendto_one_tags(target_p, NOCAPS, NOCAPS, outer_tags.n_tags, outer_tags.tags,
 			":%s BATCH +%s draft/multiline %s",
-			origin, batch->id, target_p->name);
+			origin, batch->id, get_id(target_p, target_p));
 
 		RB_DLINK_FOREACH(ptr, batch->messages.head)
 		{
@@ -421,6 +428,7 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 		}
 
 		sendto_one(target_p, ":%s BATCH -%s", origin, batch->id);
+		resume_response_batch(info);
 	}
 	else
 	{
@@ -476,6 +484,8 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 			if (NotClientCapable(source_p, CLICAP_ECHO_MESSAGE))
 				return;
 
+			/* omit batch tag on local echo; it's only needed for s2s since we send a nested batch there */
+			outer_tags.tags[batch_tag].capmask = 0;
 			sendto_one_tags(source_p, NOCAPS, NOCAPS, outer_tags.n_tags, outer_tags.tags,
 				":%s BATCH +%s draft/multiline %s",
 				echo_prefix, batch->tag, target_p->name);

@@ -226,6 +226,15 @@ finish_batch(struct Client *client_p, struct Client *source_p, struct Batch *bat
 		}
 	}
 
+	/* send a labeled-response ACK if needed for local clients; s2s can continue to rely on parse_end but
+	 * we wipe the batch context below and free its memory so we can't rely on that hook for local clients */
+	if (batch->response_info != NULL
+		&& MyClient(batch->response_info->source_p)
+		&& (batch->response_info->flags & RESPONSE_FLAG_SENT) == 0)
+	{
+		sendto_one(batch->response_info->source_p, ":%s ACK", me.name);
+	}
+
 	batch_free(batch, info);
 	reset_global_context();
 }
