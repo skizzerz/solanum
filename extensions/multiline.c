@@ -371,9 +371,11 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 	struct Client *target_p,
 	struct Batch *batch, size_t n_tags, struct MsgTag tags[])
 {
+	struct MsgBuf outer_tags = {0};
 	rb_dlink_node *ptr;
 	char origin[USERHOST_REPLYLEN];
 	int msgid = -1;
+	int batch_tag = -1;
 	uint64_t CAP_ECHO = capability_get(serv_capindex, "ECHO", NULL);
 	uint64_t CAP_ECHOB = capability_get(serv_capindex, "ECHOB", NULL);
 	s_assert(CAP_ECHO != 0 && CAP_ECHOB != 0);
@@ -386,10 +388,12 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 	for (size_t i = 0; i < n_tags; i++)
 	{
 		if (!strcmp(tags[i].key, "msgid"))
-		{
 			msgid = (int)i;
-			break;
-		}
+
+		if (!strcmp(tags[i].key, "batch"))
+			batch_tag = (int)i;
+
+		msgbuf_append_tag(&outer_tags, tags[i].key, tags[i].value, tags[i].capmask);
 	}
 
 	snprintf(origin, sizeof(origin), IsPerson(source_p) && MyClient(target_p) ? "%s!%s@%s" : "%s",
@@ -403,7 +407,7 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 	if ((MyClient(target_p) && IsClientCapable(target_p, CLICAP_MULTILINE | CLICAP_BATCH))
 		|| (!MyClient(target_p) && IsServerCapable(target_p->from, CAP_MULTILINE)))
 	{
-		sendto_one_tags(target_p, NOCAPS, NOCAPS, n_tags, tags,
+		sendto_one_tags(target_p, NOCAPS, NOCAPS, outer_tags.n_tags, outer_tags.tags,
 			":%s BATCH +%s draft/multiline %s",
 			origin, batch->id, target_p->name);
 
@@ -434,7 +438,7 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 				continue;
 
 			sendto_one_tags(target_p, NOCAPS, NOCAPS,
-				n_tags, tags, ":%s %s %s :%s",
+				outer_tags.n_tags, outer_tags.tags, ":%s %s %s :%s",
 				origin, command, get_id(target_p, target_p), data->msg.para[2]);
 
 			/* msgid should only be attached to the first message of the fallback */
@@ -450,7 +454,16 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 	{
 		char echo_batch_id[16];
 		generate_batch_id(echo_batch_id, sizeof(echo_batch_id));
-		struct MsgTag echo_batch = { "batch", echo_batch_id, CLICAP_BATCH };
+		if (batch_tag > -1)
+		{
+			outer_tags.tags[batch_tag].value = echo_batch_id;
+			outer_tags.tags[batch_tag].capmask = CLICAP_BATCH;
+		}
+		else
+		{
+			batch_tag = outer_tags.n_tags;
+			msgbuf_append_tag(&outer_tags, "batch", echo_batch_id, CLICAP_BATCH);
+		}
 
 		/* echo the incoming batch tag rather than our synthesized one */
 		inner_tags[0].value = batch->tag;
@@ -463,7 +476,7 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 			if (NotClientCapable(source_p, CLICAP_ECHO_MESSAGE))
 				return;
 
-			sendto_one_tags(source_p, NOCAPS, NOCAPS, n_tags, tags,
+			sendto_one_tags(source_p, NOCAPS, NOCAPS, outer_tags.n_tags, outer_tags.tags,
 				":%s BATCH +%s draft/multiline %s",
 				echo_prefix, batch->tag, target_p->name);
 		}
@@ -474,7 +487,7 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 				":%s BATCH +%s solanum.chat/echo %s",
 				echo_prefix, echo_batch_id, use_id(source_p));
 
-			sendto_one_tags(source_p, serv_cap, NOCAPS, 1, &echo_batch,
+			sendto_one_tags(source_p, serv_cap, NOCAPS, outer_tags.n_tags, outer_tags.tags,
 				":%s BATCH +%s draft/multiline %s",
 				echo_prefix, batch->tag, target_p->name);
 		}
@@ -494,7 +507,7 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 				":%s BATCH -%s", echo_prefix, batch->tag);
 		else
 		{
-			sendto_one_tags(source_p, serv_cap, NOCAPS, 1, &echo_batch,
+			sendto_one_tags(source_p, serv_cap, NOCAPS, 1, &outer_tags.tags[batch_tag],
 				":%s BATCH -%s", echo_prefix, batch->tag);
 
 			sendto_one_tags(source_p, serv_cap, NOCAPS, 0, NULL,
@@ -569,6 +582,14 @@ process_multiline(struct Client *client_p, struct Client *source_p, struct Batch
 	}
 
 	target = chtarget = batch->start->msg.para[3];
+	if (strchr(target, ',') != NULL)
+	{
+		if (MyClient(source_p))
+			sendto_one(source_p, ":%s FAIL BATCH MULTILINE_INVALID :multiline batches do not support multiple targets",
+				me.name);
+		return;
+	}
+
 	/* statusmsg/eopmod? */
 	if (*target == '@')
 	{
