@@ -1207,23 +1207,23 @@ roundtrip_echo_label(void)
 	is_client_sendq(expected, server, MSG);
 
 	/* the echo-message we'd expect back from the s2s link */
-	snprintf(line, sizeof(line), "@solanum.chat/response=%s,%s,%s :%s BATCH +%s solanum.chat/echo %s" CRLF,
-		user->id, batch2, server->name, remote->id, batch2, user->id);
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,%s,%s :%s BATCH +outer solanum.chat/echo %s" CRLF,
+		user->id, batch2, server->name, remote->id, user->id);
 	client_util_parse(server, line);
-	snprintf(line, sizeof(line), "@msgid=" MSGID ";solanum.chat/response=%s,%s,%s;batch=%s :%s BATCH +%s draft/multiline %s" CRLF,
-		user->id, batch2, server->name, batch2, remote->id, batch1, remote->name);
+	snprintf(line, sizeof(line), "@msgid=" MSGID ";solanum.chat/response=%s,%s,%s;batch=outer :%s BATCH +inner draft/multiline %s" CRLF,
+		user->id, batch2, server->name, remote->id, remote->name);
 	client_util_parse(server, line);
-	snprintf(line, sizeof(line), "@batch=%s;solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :one" CRLF,
-		batch1, user->id, batch2, server->name, remote->id, remote->name);
+	snprintf(line, sizeof(line), "@batch=inner;solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :one" CRLF,
+		user->id, batch2, server->name, remote->id, remote->name);
 	client_util_parse(server, line);
-	snprintf(line, sizeof(line), "@batch=%s;solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :two" CRLF,
-		batch1, user->id, batch2, server->name, remote->id, remote->name);
+	snprintf(line, sizeof(line), "@batch=inner;solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :two" CRLF,
+		user->id, batch2, server->name, remote->id, remote->name);
 	client_util_parse(server, line);
-	snprintf(line, sizeof(line), "@batch=%s;solanum.chat/response=%s,%s,%s :%s BATCH -%s" CRLF,
-		batch2, user->id, batch2, server->name, remote->id, batch1);
+	snprintf(line, sizeof(line), "@batch=outer;solanum.chat/response=%s,%s,%s :%s BATCH -inner" CRLF,
+		user->id, batch2, server->name, remote->id);
 	client_util_parse(server, line);
-	snprintf(line, sizeof(line), "@solanum.chat/response=%s,%s,%s :%s BATCH -%s" CRLF,
-		user->id, batch2, server->name, remote->id, batch2);
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,%s,%s :%s BATCH -outer" CRLF,
+		user->id, batch2, server->name, remote->id);
 	client_util_parse(server, line);
 	snprintf(line, sizeof(line), "@solanum.chat/response=%s,%s,%s :%s ENCAP %s ACK" CRLF,
 		user->id, batch2, server->name, server->id, me.name);
@@ -1233,17 +1233,17 @@ roundtrip_echo_label(void)
 	snprintf(expected, sizeof(expected), "@label=foo :%s BATCH +%s labeled-response" CRLF,
 		me.name, batch2);
 	is_client_sendq_one(expected, user, MSG);
-	snprintf(expected, sizeof(expected), "@batch=%s;msgid=" MSGID " :%s!%s@%s BATCH +%s draft/multiline %s" CRLF,
-		batch2, user->name, user->username, user->host, batch1, remote->name);
+	snprintf(expected, sizeof(expected), "@batch=%s;msgid=" MSGID " :%s!%s@%s BATCH +inner draft/multiline %s" CRLF,
+		batch2, user->name, user->username, user->host, remote->name);
 	is_client_sendq_one(expected, user, MSG);
-	snprintf(expected, sizeof(expected), "@batch=%s :%s!%s@%s PRIVMSG %s :one" CRLF,
-		batch1, user->name, user->username, user->host, remote->name);
+	snprintf(expected, sizeof(expected), "@batch=inner :%s!%s@%s PRIVMSG %s :one" CRLF,
+		user->name, user->username, user->host, remote->name);
 	is_client_sendq_one(expected, user, MSG);
-	snprintf(expected, sizeof(expected), "@batch=%s :%s!%s@%s PRIVMSG %s :two" CRLF,
-		batch1, user->name, user->username, user->host, remote->name);
+	snprintf(expected, sizeof(expected), "@batch=inner :%s!%s@%s PRIVMSG %s :two" CRLF,
+		user->name, user->username, user->host, remote->name);
 	is_client_sendq_one(expected, user, MSG);
-	snprintf(expected, sizeof(expected), "@batch=%s :%s!%s@%s BATCH -%s" CRLF,
-		batch2, user->name, user->username, user->host, batch1);
+	snprintf(expected, sizeof(expected), "@batch=%s :%s!%s@%s BATCH -inner" CRLF,
+		batch2, user->name, user->username, user->host);
 	is_client_sendq_one(expected, user, MSG);
 	snprintf(expected, sizeof(expected), ":%s BATCH -%s" CRLF,
 		me.name, batch2);
