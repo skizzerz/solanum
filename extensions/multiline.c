@@ -450,11 +450,34 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 	}
 	else
 	{
+		/* to avoid closing the labeled-response batch sent to the client early, ensure we only
+		 * get ENCAP ACK for the final message of the fallback by obscuring the remote server mask */
+		int cur = 0, final = 0;
+		char *orig_mask = NULL;
+		char hyphen = '-';
 		RB_DLINK_FOREACH(ptr, batch->messages.head)
 		{
 			struct BatchMessage *data = ptr->data;
 			if (EmptyString(data->msg.para[2]))
 				continue;
+
+			++final;
+		}
+
+		if (outgoing_response_info != NULL && outgoing_response_info->mask != NULL)
+		{
+			orig_mask = outgoing_response_info->mask;
+			outgoing_response_info->mask = &hyphen;
+		}
+
+		RB_DLINK_FOREACH(ptr, batch->messages.head)
+		{
+			struct BatchMessage *data = ptr->data;
+			if (EmptyString(data->msg.para[2]))
+				continue;
+
+			if (++cur == final && outgoing_response_info != NULL)
+				outgoing_response_info->mask = orig_mask;
 
 			sendto_one_tags(target_p, NOCAPS, NOCAPS,
 				outer_tags.n_tags, outer_tags.tags, ":%s %s %s :%s",
@@ -464,6 +487,9 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 			if (msgid > -1)
 				outer_tags.tags[msgid].capmask = NOCAPS;
 		}
+
+		/* if mask is still &hyphen at this point we'll blow up later when we try to free() it */
+		s_assert(outgoing_response_info == NULL || outgoing_response_info->mask != &hyphen);
 	}
 
 	/* we'll get a remote echo if the target server supports ECHO but not MULTILINE **OR** if it supports both ECHOB and MULTILINE */

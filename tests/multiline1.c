@@ -1272,19 +1272,22 @@ roundtrip_echo_label__fallback(void)
 	snprintf(line, sizeof(line), "@batch=remote PRIVMSG %s :two" CRLF,
 		remote->name);
 	client_util_parse(user, line);
+	snprintf(line, sizeof(line), "@batch=remote PRIVMSG %s :" CRLF,
+		remote->name);
+	client_util_parse(user, line);
 	client_util_parse(user, "BATCH -remote" CRLF);
 
-	/* what we're sending to the remote server */
-	snprintf(expected, sizeof(expected), "@msgid=" MSGID ";solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :one" CRLF,
-		user->id, batch2, server->name, user->id, remote->id);
+	/* what we're sending to the remote server (the mask portion of the response tag is "-" for all but the final message) */
+	snprintf(expected, sizeof(expected), "@msgid=" MSGID ";solanum.chat/response=%s,%s,- :%s PRIVMSG %s :one" CRLF,
+		user->id, batch2, user->id, remote->id);
 	is_client_sendq_one(expected, server, MSG);
 	snprintf(expected, sizeof(expected), "@solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :two" CRLF,
 		user->id, batch2, server->name, user->id, remote->id);
 	is_client_sendq(expected, server, MSG);
 
 	/* the echo-message we'd expect back from the s2s link */
-	snprintf(line, sizeof(line), "@msgid=" MSGID ";solanum.chat/response=%s,%s,%s :%s ECHO P %s :one" CRLF,
-		user->id, batch2, server->name, remote->id, user->id);
+	snprintf(line, sizeof(line), "@msgid=" MSGID ";solanum.chat/response=%s,%s,- :%s ECHO P %s :one" CRLF,
+		user->id, batch2, remote->id, user->id);
 	client_util_parse(server, line);
 	snprintf(line, sizeof(line), "@solanum.chat/response=%s,%s,%s :%s ECHO P %s :two" CRLF,
 		user->id, batch2, server->name, remote->id, user->id);
