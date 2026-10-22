@@ -18,6 +18,8 @@
  * Foundation, Inc., 51 Franklin Street, Suite 500, Boston, MA 02110-1335 USA
  */
 
+#include <math.h>
+
 #include "stdinc.h"
 #include "tap/basic.h"
 
@@ -49,6 +51,7 @@ static void (*reset_msgid_for_tests)(void); /* defined at the end of tag_message
 
 static uint64_t CLICAP_MULTILINE;
 static uint64_t CAP_MULTILINE;
+static uint64_t CAP_ECHO;
 static uint64_t CAP_ECHOB;
 
 static struct Client *user;
@@ -487,7 +490,7 @@ local_to_remote__label(void)
 	char line[BUFSIZE];
 
 	standard_init();
-	SetClientCap(user, CLICAP_BATCH | CLICAP_MULTILINE | CLICAP_LABELED_RESPONSE);
+	SetClientCap(user, CLICAP_BATCH | CLICAP_MULTILINE | CLICAP_LABELED_RESPONSE | CLICAP_ECHO_MESSAGE);
 	SetServerCap(server, CAP_MULTILINE | CAP_ECHOB);
 
 	snprintf(line, sizeof(line), "@label=foo BATCH +remote draft/multiline %s" CRLF,
@@ -499,13 +502,13 @@ local_to_remote__label(void)
 	client_util_parse(user, "BATCH -remote" CRLF);
 
 	snprintf(expected, sizeof(expected), "@msgid=" MSGID ";solanum.chat/response=%s,%s,%s :%s BATCH +%s draft/multiline %s" CRLF,
-		user->id, batch1, server->name, user->id, batch1, remote->id);
+		user->id, batch2, server->name, user->id, batch1, remote->id);
 	is_client_sendq_one(expected, server, MSG);
-	snprintf(expected, sizeof(expected), "@solanum.chat/response=%s,%s,%s;batch=%s :%s PRIVMSG %s :one" CRLF,
-		user->id, batch1, server->name, batch1, user->id, remote->id);
+	snprintf(expected, sizeof(expected), "@batch=%s;solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :one" CRLF,
+		batch1, user->id, batch2, server->name, user->id, remote->id);
 	is_client_sendq_one(expected, server, MSG);
 	snprintf(expected, sizeof(expected), "@solanum.chat/response=%s,%s,%s :%s BATCH -%s" CRLF,
-		user->id, batch1, server->name, user->id, batch1);
+		user->id, batch2, server->name, user->id, batch1);
 	is_client_sendq(expected, server, MSG);
 
 	standard_free();
@@ -951,7 +954,6 @@ remote_to_local__echo_batch(void)
 
 	standard_init();
 	SetServerCap(server, CAP_MULTILINE | CAP_ECHOB);
-	SetClientCap(user, CLICAP_BATCH | CLICAP_MULTILINE);
 
 	snprintf(line, sizeof(line), ":%s BATCH +remote draft/multiline %s" CRLF, remote->id, user->id);
 	client_util_parse(server, line);
@@ -959,7 +961,6 @@ remote_to_local__echo_batch(void)
 	client_util_parse(server, line);
 	client_util_parse(server, ":" TEST_REMOTE_ID " BATCH -remote" CRLF);
 
-	drain_client_sendq(user);
 	snprintf(expected, sizeof(expected), ":%s BATCH +%s solanum.chat/echo %s" CRLF,
 		user->id, batch2, remote->id);
 	is_client_sendq_one(expected, server, MSG);
@@ -973,6 +974,48 @@ remote_to_local__echo_batch(void)
 		batch2, user->id);
 	is_client_sendq_one(expected, server, MSG);
 	snprintf(expected, sizeof(expected), ":%s BATCH -%s" CRLF, user->id, batch2);
+	is_client_sendq(expected, server, MSG);
+
+	standard_free();
+}
+
+static void
+remote_to_local__echo_label(void)
+{
+	char expected[BUFSIZE];
+	char line[BUFSIZE];
+
+	standard_init();
+	SetServerCap(server, CAP_MULTILINE | CAP_ECHOB);
+
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,outer,%s :%s BATCH +remote draft/multiline %s" CRLF,
+		remote->id, me.name, remote->id, user->id);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@batch=remote;solanum.chat/response=%s,outer,%s :%s PRIVMSG %s :first" CRLF,
+		remote->id, me.name, remote->id, user->id);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,outer,%s :%s BATCH -remote" CRLF,
+		remote->id, me.name, remote->id);
+	client_util_parse(server, line);
+
+	snprintf(expected, sizeof(expected), "@solanum.chat/response=%s,outer,%s :%s BATCH +%s solanum.chat/echo %s" CRLF,
+		remote->id, me.name, user->id, batch2, remote->id);
+	is_client_sendq_one(expected, server, MSG);
+	/* normally batch comes first but the response tag is inherited from the incoming message and batch gets tacked on during echo handling */
+	snprintf(expected, sizeof(expected), "@solanum.chat/response=%s,outer,%s;batch=%s :%s BATCH +remote draft/multiline %s" CRLF,
+		remote->id, me.name, batch2, user->id, user->name);
+	is_client_sendq_one(expected, server, MSG);
+	snprintf(expected, sizeof(expected), "@batch=remote;solanum.chat/response=%s,outer,%s :%s PRIVMSG %s :first" CRLF,
+		remote->id, me.name, user->id, user->name);
+	is_client_sendq_one(expected, server, MSG);
+	snprintf(expected, sizeof(expected), "@batch=%s;solanum.chat/response=%s,outer,%s :%s BATCH -remote" CRLF,
+		batch2, remote->id, me.name, user->id);
+	is_client_sendq_one(expected, server, MSG);
+	snprintf(expected, sizeof(expected), "@solanum.chat/response=%s,outer,%s :%s BATCH -%s" CRLF,
+		remote->id, me.name, user->id, batch2);
+	is_client_sendq_one(expected, server, MSG);
+	snprintf(expected, sizeof(expected), "@solanum.chat/response=%s,outer,%s :%s ENCAP %s ACK" CRLF,
+		remote->id, me.name, me.id, server->name);
 	is_client_sendq(expected, server, MSG);
 
 	standard_free();
@@ -1127,6 +1170,146 @@ remote_to_opmod_channel__no_chw(void)
 	standard_free();
 }
 
+static void
+roundtrip_echo_label(void)
+{
+	char expected[BUFSIZE];
+	char line[BUFSIZE];
+
+	standard_init();
+	SetClientCap(user, CLICAP_BATCH | CLICAP_MULTILINE | CLICAP_LABELED_RESPONSE | CLICAP_ECHO_MESSAGE | CLICAP_MESSAGE_TAGS);
+	SetServerCap(server, CAP_MULTILINE | CAP_ECHOB);
+
+	/* the original multiline message */
+	snprintf(line, sizeof(line), "@label=foo BATCH +remote draft/multiline %s" CRLF,
+		remote->name);
+	client_util_parse(user, line);
+	snprintf(line, sizeof(line), "@batch=remote PRIVMSG %s :one" CRLF,
+		remote->name);
+	client_util_parse(user, line);
+	snprintf(line, sizeof(line), "@batch=remote PRIVMSG %s :two" CRLF,
+		remote->name);
+	client_util_parse(user, line);
+	client_util_parse(user, "BATCH -remote" CRLF);
+
+	/* what we're sending to the remote server */
+	snprintf(expected, sizeof(expected), "@msgid=" MSGID ";solanum.chat/response=%s,%s,%s :%s BATCH +%s draft/multiline %s" CRLF,
+		user->id, batch2, server->name, user->id, batch1, remote->id);
+	is_client_sendq_one(expected, server, MSG);
+	snprintf(expected, sizeof(expected), "@batch=%s;solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :one" CRLF,
+		batch1, user->id, batch2, server->name, user->id, remote->id);
+	is_client_sendq_one(expected, server, MSG);
+	snprintf(expected, sizeof(expected), "@batch=%s;solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :two" CRLF,
+		batch1, user->id, batch2, server->name, user->id, remote->id);
+	is_client_sendq_one(expected, server, MSG);
+	snprintf(expected, sizeof(expected), "@solanum.chat/response=%s,%s,%s :%s BATCH -%s" CRLF,
+		user->id, batch2, server->name, user->id, batch1);
+	is_client_sendq(expected, server, MSG);
+
+	/* the echo-message we'd expect back from the s2s link */
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,%s,%s :%s BATCH +%s solanum.chat/echo %s" CRLF,
+		user->id, batch2, server->name, remote->id, batch2, user->id);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@msgid=" MSGID ";solanum.chat/response=%s,%s,%s;batch=%s :%s BATCH +%s draft/multiline %s" CRLF,
+		user->id, batch2, server->name, batch2, remote->id, batch1, remote->name);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@batch=%s;solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :one" CRLF,
+		batch1, user->id, batch2, server->name, remote->id, remote->name);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@batch=%s;solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :two" CRLF,
+		batch1, user->id, batch2, server->name, remote->id, remote->name);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@batch=%s;solanum.chat/response=%s,%s,%s :%s BATCH -%s" CRLF,
+		batch2, user->id, batch2, server->name, remote->id, batch1);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,%s,%s :%s BATCH -%s" CRLF,
+		user->id, batch2, server->name, remote->id, batch2);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,%s,%s :%s ENCAP %s ACK" CRLF,
+		user->id, batch2, server->name, server->id, me.name);
+	client_util_parse(server, line);
+
+	/* and the echo-message response we're expecting to get */
+	snprintf(expected, sizeof(expected), "@label=foo :%s BATCH +%s labeled-response" CRLF,
+		me.name, batch2);
+	is_client_sendq_one(expected, user, MSG);
+	snprintf(expected, sizeof(expected), "@batch=%s;msgid=" MSGID " :%s!%s@%s BATCH +%s draft/multiline %s" CRLF,
+		batch2, user->name, user->username, user->host, batch1, remote->name);
+	is_client_sendq_one(expected, user, MSG);
+	snprintf(expected, sizeof(expected), "@batch=%s :%s!%s@%s PRIVMSG %s :one" CRLF,
+		batch1, user->name, user->username, user->host, remote->name);
+	is_client_sendq_one(expected, user, MSG);
+	snprintf(expected, sizeof(expected), "@batch=%s :%s!%s@%s PRIVMSG %s :two" CRLF,
+		batch1, user->name, user->username, user->host, remote->name);
+	is_client_sendq_one(expected, user, MSG);
+	snprintf(expected, sizeof(expected), "@batch=%s :%s!%s@%s BATCH -%s" CRLF,
+		batch2, user->name, user->username, user->host, batch1);
+	is_client_sendq_one(expected, user, MSG);
+	snprintf(expected, sizeof(expected), ":%s BATCH -%s" CRLF,
+		me.name, batch2);
+	is_client_sendq(expected, user, MSG);
+
+	standard_free();
+}
+
+static void
+roundtrip_echo_label__fallback(void)
+{
+	char expected[BUFSIZE];
+	char line[BUFSIZE];
+
+	standard_init();
+	SetClientCap(user, CLICAP_BATCH | CLICAP_MULTILINE | CLICAP_LABELED_RESPONSE | CLICAP_ECHO_MESSAGE | CLICAP_MESSAGE_TAGS);
+	SetServerCap(server, CAP_ECHO);
+
+	/* the original multiline message */
+	snprintf(line, sizeof(line), "@label=foo BATCH +remote draft/multiline %s" CRLF,
+		remote->name);
+	client_util_parse(user, line);
+	snprintf(line, sizeof(line), "@batch=remote PRIVMSG %s :one" CRLF,
+		remote->name);
+	client_util_parse(user, line);
+	snprintf(line, sizeof(line), "@batch=remote PRIVMSG %s :two" CRLF,
+		remote->name);
+	client_util_parse(user, line);
+	client_util_parse(user, "BATCH -remote" CRLF);
+
+	/* what we're sending to the remote server */
+	snprintf(expected, sizeof(expected), "@msgid=" MSGID ";solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :one" CRLF,
+		user->id, batch2, server->name, user->id, remote->id);
+	is_client_sendq_one(expected, server, MSG);
+	snprintf(expected, sizeof(expected), "@solanum.chat/response=%s,%s,%s :%s PRIVMSG %s :two" CRLF,
+		user->id, batch2, server->name, user->id, remote->id);
+	is_client_sendq(expected, server, MSG);
+
+	/* the echo-message we'd expect back from the s2s link */
+	snprintf(line, sizeof(line), "@msgid=" MSGID ";solanum.chat/response=%s,%s,%s :%s ECHO P %s :one" CRLF,
+		user->id, batch2, server->name, remote->id, user->id);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,%s,%s :%s ECHO P %s :two" CRLF,
+		user->id, batch2, server->name, remote->id, user->id);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,%s,%s :%s ENCAP %s ACK" CRLF,
+		user->id, batch2, server->name, server->id, me.name);
+	client_util_parse(server, line);
+
+	/* and the echo-message response we're expecting to get */
+	snprintf(expected, sizeof(expected), "@label=foo :%s BATCH +%s labeled-response" CRLF,
+		me.name, batch2);
+	is_client_sendq_one(expected, user, MSG);
+	snprintf(expected, sizeof(expected), "@msgid=" MSGID ";batch=%s :%s!%s@%s PRIVMSG %s :one" CRLF,
+		batch2, user->name, user->username, user->host, remote->name);
+	is_client_sendq_one(expected, user, MSG);
+	snprintf(expected, sizeof(expected), "@batch=%s :%s!%s@%s PRIVMSG %s :two" CRLF,
+		batch2, user->name, user->username, user->host, remote->name);
+	is_client_sendq_one(expected, user, MSG);
+	snprintf(expected, sizeof(expected), ":%s BATCH -%s" CRLF,
+		me.name, batch2);
+	is_client_sendq(expected, user, MSG);
+
+	standard_free();
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1140,9 +1323,11 @@ main(int argc, char *argv[])
 
 	CLICAP_MULTILINE = capability_get(cli_capindex, "draft/multiline", NULL);
 	CAP_MULTILINE = capability_get(serv_capindex, "MULTILN", NULL);
+	CAP_ECHO = capability_get(serv_capindex, "ECHO", NULL);
 	CAP_ECHOB = capability_get(serv_capindex, "ECHOB", NULL);
 	ok(CLICAP_MULTILINE != 0, "draft/multiline client capability is loaded");
 	ok(CAP_MULTILINE != 0, "MULTILN server capability is loaded");
+	ok(CAP_ECHO != 0, "ECHO server capability is loaded");
 	ok(CAP_ECHOB != 0, "ECHOB server capability is loaded");
 
 	struct module *tag_message_id = findmodule_byname("tag_message_id");
@@ -1188,11 +1373,14 @@ main(int argc, char *argv[])
 	local_validation__invalid_reference_tag();
 	remote_to_local();
 	remote_to_local__echo_batch();
+	remote_to_local__echo_label();
 	remote_to_remote();
 	remote_to_remote__fallback();
 	remote_to_opmod_channel();
 	remote_to_opmod_channel__no_eopmod();
 	remote_to_opmod_channel__no_chw();
+	roundtrip_echo_label();
+	roundtrip_echo_label__fallback();
 
 	client_util_free();
 	ircd_util_free();

@@ -1009,6 +1009,7 @@ process_echo_batch(struct Client *client_p, struct Client *source_p, struct Batc
 	char params[BUFSIZE];
 	char prefix[USERHOST_REPLYLEN];
 	rb_dlink_node *ptr;
+	const char *outer = NULL;
 
 	/* only allow this batch over s2s links */
 	if (!IsServer(client_p))
@@ -1053,9 +1054,17 @@ process_echo_batch(struct Client *client_p, struct Client *source_p, struct Batc
 			prefix, params);
 	}
 
+	if (MyClient(target_p))
+	{
+		if (outgoing_response_info != NULL)
+			outer = outgoing_response_info->batch;
+	}
+	else
+		outer = batch->tag;
+
 	RB_DLINK_FOREACH(ptr, batch->children.head)
 	{
-		echo_inner_batch(client_p, source_p, target_p, ptr->data, prefix, MyClient(target_p) ? NULL : batch->tag);
+		echo_inner_batch(client_p, source_p, target_p, ptr->data, prefix, outer);
 	}
 
 	if (!MyClient(target_p))

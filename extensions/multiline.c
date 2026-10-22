@@ -382,6 +382,14 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 	uint64_t CAP_ECHOB = capability_get(serv_capindex, "ECHOB", NULL);
 	s_assert(CAP_ECHO != 0 && CAP_ECHOB != 0);
 
+	if (MyClient(source_p) && ConfigFileEntry.target_change && !IsOperGeneral(source_p)
+		&& !find_allowing_channel(source_p, target_p) && !add_target(source_p, target_p))
+	{
+		sendto_one(source_p, form_str(ERR_TARGCHANGE),
+			me.name, source_p->name, target_p->name);
+		return;
+	}
+
 	/* figure out command and normalize to uppercase */
 	const char *command = ((struct BatchMessage *)batch->messages.head->data)->msg.cmd;
 	enum message_type msgtype = !rb_strcasecmp(command, "PRIVMSG") ? MESSAGE_TYPE_PRIVMSG : MESSAGE_TYPE_NOTICE;
@@ -405,6 +413,16 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 		{ "batch", batch->id, CLICAP_BATCH },
 		{ "draft/multiline-concat", NULL, CLICAP_MULTILINE },
 	};
+
+	/* set up remote labeled-response context for remote targets if we're getting an echo from them */
+	if (MyClient(source_p) && IsClientCapable(source_p, CLICAP_ECHO_MESSAGE) && !MyClient(target_p)
+		&& (
+			(NotServerCapable(target_p->from, CAP_MULTILINE) && IsServerCapable(target_p->from, CAP_ECHO))
+			|| IsServerCapable(target_p->from, CAP_MULTILINE | CAP_ECHOB)
+		))
+	{
+		begin_remote_response_batch(1, target_p->servptr->name);
+	}
 
 	if ((MyClient(target_p) && IsClientCapable(target_p, CLICAP_MULTILINE | CLICAP_BATCH))
 		|| (!MyClient(target_p) && IsServerCapable(target_p->from, CAP_MULTILINE)))
@@ -432,13 +450,6 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 	}
 	else
 	{
-		/* we'll be getting potentially multiple regular ECHOs due to fallback behaviour,
-		 * so we need to make a labeled-response batch for it maybe */
-		if (MyClient(source_p) && IsServerCapable(target_p->from, CAP_ECHO) && IsClientCapable(source_p, CLICAP_ECHO_MESSAGE))
-		{
-			begin_remote_response_batch(1, target_p->servptr->name);
-		}
-
 		RB_DLINK_FOREACH(ptr, batch->messages.head)
 		{
 			struct BatchMessage *data = ptr->data;
@@ -451,7 +462,7 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 
 			/* msgid should only be attached to the first message of the fallback */
 			if (msgid > -1)
-				tags[msgid].capmask = NOCAPS;
+				outer_tags.tags[msgid].capmask = NOCAPS;
 		}
 	}
 
@@ -472,6 +483,9 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 			batch_tag = outer_tags.n_tags;
 			msgbuf_append_tag(&outer_tags, "batch", echo_batch_id, CLICAP_BATCH);
 		}
+
+		if (msgid > -1)
+			outer_tags.tags[msgid].capmask = CLICAP_MESSAGE_TAGS;
 
 		/* echo the incoming batch tag rather than our synthesized one */
 		inner_tags[0].value = batch->tag;
