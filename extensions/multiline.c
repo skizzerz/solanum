@@ -454,7 +454,7 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 		 * get ENCAP ACK for the final message of the fallback by obscuring the remote server mask */
 		int cur = 0, final = 0;
 		char *orig_mask = NULL;
-		char hyphen = '-';
+		char hyphen[2] = "-";
 		RB_DLINK_FOREACH(ptr, batch->messages.head)
 		{
 			struct BatchMessage *data = ptr->data;
@@ -467,7 +467,7 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 		if (outgoing_response_info != NULL && outgoing_response_info->mask != NULL)
 		{
 			orig_mask = outgoing_response_info->mask;
-			outgoing_response_info->mask = &hyphen;
+			outgoing_response_info->mask = hyphen;
 		}
 
 		RB_DLINK_FOREACH(ptr, batch->messages.head)
@@ -488,8 +488,8 @@ send_private_batch(struct Client *client_p, struct Client *source_p,
 				outer_tags.tags[msgid].capmask = NOCAPS;
 		}
 
-		/* if mask is still &hyphen at this point we'll blow up later when we try to free() it */
-		s_assert(outgoing_response_info == NULL || outgoing_response_info->mask != &hyphen);
+		/* if mask is still hyphen at this point we'll blow up later when we try to free() it */
+		s_assert(outgoing_response_info == NULL || outgoing_response_info->mask != hyphen);
 	}
 
 	/* we'll get a remote echo if the target server supports ECHO but not MULTILINE **OR** if it supports both ECHOB and MULTILINE */
