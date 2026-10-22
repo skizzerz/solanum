@@ -1083,6 +1083,40 @@ remote_to_remote__fallback(void)
 }
 
 static void
+remote_to_remote__fallback_label(void)
+{
+	char expected[BUFSIZE];
+	char line[BUFSIZE];
+
+	standard_init();
+	SetServerCap(server, CAP_MULTILINE | CAP_ECHOB);
+	SetServerCap(server2, CAP_ECHO);
+
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,outer,%s :%s BATCH +remote draft/multiline %s" CRLF,
+		remote->id, server2->name, remote->id, remote2->id);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,outer,%s;batch=remote :%s PRIVMSG %s :first" CRLF,
+		remote->id, server2->name, remote->id, remote2->id);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,outer,%s;batch=remote;draft/multiline-concat :%s PRIVMSG %s :second" CRLF,
+		remote->id, server2->name, remote->id, remote2->id);
+	client_util_parse(server, line);
+	snprintf(line, sizeof(line), "@solanum.chat/response=%s,outer,%s :%s BATCH -remote" CRLF,
+		remote->id, server2->name, remote->id);
+	client_util_parse(server, line);
+
+	/* when propagating a batch to a fallback, omit the mask on everything except the final message */
+	snprintf(expected, sizeof(expected), "@solanum.chat/response=%s,outer,- :%s PRIVMSG %s :first" CRLF,
+		remote->id, remote->id, remote2->id);
+	is_client_sendq_one(expected, server2, MSG);
+	snprintf(expected, sizeof(expected), "@solanum.chat/response=%s,outer,%s :%s PRIVMSG %s :second" CRLF,
+		remote->id, server2->name, remote->id, remote2->id);
+	is_client_sendq(expected, server2, MSG);
+
+	standard_free();
+}
+
+static void
 remote_to_opmod_channel(void)
 {
 	char expected[BUFSIZE];
@@ -1379,6 +1413,7 @@ main(int argc, char *argv[])
 	remote_to_local__echo_label();
 	remote_to_remote();
 	remote_to_remote__fallback();
+	remote_to_remote__fallback_label();
 	remote_to_opmod_channel();
 	remote_to_opmod_channel__no_eopmod();
 	remote_to_opmod_channel__no_chw();
